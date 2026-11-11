@@ -1,0 +1,3 @@
+# El equipo de ML agrega aqui sus librerias (pandas, scikit-learn, etc.).
+# Ojo: verifiquen que soporten Python 3.14; si alguna no instala, bajen todos a 3.12 o 3.13.
+psycopg[binary]>=3.2.10

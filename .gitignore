@@ -1,0 +1,15 @@
+# Secretos: NUNCA subir al repositorio
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editor / sistema
+.vscode/
+.idea/
+.DS_Store

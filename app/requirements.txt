@@ -1,0 +1,2 @@
+# Despues de fijar versiones exactas con: pip freeze
+psycopg[binary]>=3.2.10
