@@ -42,7 +42,8 @@ services:
     networks: [data_net]
 
 networks:
-  # Zona de aplicacion (sale a internet solo hacia Supabase; el filtrado se agrega en el firewall del host)
+  # Zona de aplicacion con salida a internet.
+  # Restriccion exclusiva hacia Supabase pendiente de implementar.
   app_net:
     driver: bridge
     ipam:

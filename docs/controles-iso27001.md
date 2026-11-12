@@ -55,7 +55,7 @@ Resultado: eliminación de `LINEA-PRODUCCION`, conservando las reglas existentes
 
 Se registraron cambios de endurecimiento de Docker en la rama `feature/network-security`, mediante el commit `3a151d0`.
 
-Los scripts del firewall deben incorporarse al repositorio para completar esta evidencia.
+Los scripts firewall.sh y firewall-reset.sh, junto con la documentación de seguridad, fueron incorporados al repositorio en la rama feature/network-security.
 
 ## Resultados generales
 
