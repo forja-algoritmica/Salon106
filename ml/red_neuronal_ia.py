@@ -54,15 +54,17 @@ class PreprocesadorDatosIA:
             df_caracteristicas = df_caracteristicas.drop(columns=columnas_a_ignorar)
 
         # Detectar columnas numéricas y categóricas
-        self.columnas_numericas = df_caracteristicas.select_dtypes(include=[np.number]).columns.tolist()
+        self.columnas_numericas = df_caracteristicas.select_dtypes(include=["number"]).columns.tolist()
         self.columnas_categoricas = [c for c in df_caracteristicas.columns if c not in self.columnas_numericas]
 
         # 1. Tratar y normalizar numéricas
         df_proc = pd.DataFrame(index=df_limpio.index)
         for col in self.columnas_numericas:
             mediana = df_caracteristicas[col].median()
+            mediana = 0.0 if pd.isna(mediana) else mediana
             df_caracteristicas[col] = df_caracteristicas[col].fillna(mediana)
             media = df_caracteristicas[col].mean()
+            media = 0.0 if pd.isna(media) else media
             std = df_caracteristicas[col].std()
             if std == 0 or np.isnan(std):
                 std = 1.0
@@ -73,7 +75,8 @@ class PreprocesadorDatosIA:
 
         # 2. Tratar categóricas con One-Hot Encoding
         for col in self.columnas_categoricas:
-            moda = df_caracteristicas[col].mode()[0] if not df_caracteristicas[col].mode().empty else "DESCONOCIDO"
+            serie_clean = df_caracteristicas[col].dropna()
+            moda = serie_clean.mode()[0] if not serie_clean.empty and not serie_clean.mode().empty else "DESCONOCIDO"
             serie_col = df_caracteristicas[col].fillna(moda).astype(str)
             valores_unicos = sorted(serie_col.unique())
             self.valores_categoricos[col] = valores_unicos
@@ -86,20 +89,26 @@ class PreprocesadorDatosIA:
         X = df_proc.values.astype(np.float64)
 
         # 3. Procesar variable objetivo (y)
-        # Convertir a binario o numérico si es categórica
-        if not np.issubdtype(y_serie.dtype, np.number):
+        # Convertir a binario o numérico si es categórica o tipo texto/string
+        if not pd.api.types.is_numeric_dtype(y_serie):
             valores_target = sorted(y_serie.dropna().unique())
             mapa_target = {v: idx for idx, v in enumerate(valores_target)}
             print(f"ℹ️ Mapeo de la variable objetivo '{self.columna_target}': {mapa_target}")
             y_proc = y_serie.map(mapa_target).fillna(0).values.astype(np.float64)
         else:
-            y_proc = y_serie.fillna(y_serie.median()).values.astype(np.float64)
+            mediana_y = y_serie.median()
+            mediana_y = 0.0 if pd.isna(mediana_y) else mediana_y
+            y_proc = y_serie.fillna(mediana_y).values.astype(np.float64)
 
         # Si los valores son binarios (0 y 1 o etiquetas discretas)
         unicos = np.unique(y_proc)
         if len(unicos) <= 2:
             self.tipo_target = "binario"
-            y_proc = (y_proc == unicos[-1]).astype(np.float64)
+            if len(unicos) == 1:
+                # Todos los registros de la muestra tienen el mismo valor
+                y_proc = np.ones_like(y_proc, dtype=np.float64)
+            else:
+                y_proc = (y_proc == unicos[-1]).astype(np.float64)
         else:
             self.tipo_target = "continuo"
 
@@ -285,3 +294,61 @@ def evaluar_metricas(y_real, y_pred):
     print(f"  [VN: {vn:4d}]  [FP: {fp:4d}]")
     print(f"  [FN: {fn:4d}]  [VP: {vp:4d}]")
     print("=" * 55)
+
+
+if __name__ == "__main__":
+    print("\n" + "=" * 65)
+    print(" EJECUCIÓN AUTÓNOMA DEL MODELO DE MACHINE LEARNING / RED NEURONAL")
+    print("=" * 65)
+
+    # Generar un dataset para probar el ciclo completo de Machine Learning
+    np.random.seed(42)
+    n_muestras = 500
+
+    temperatura = np.random.normal(70, 15, n_muestras)
+    presion = np.random.normal(30, 5, n_muestras)
+    vibracion = np.random.normal(0.5, 0.2, n_muestras)
+    tipo_material = np.random.choice(["Acero", "Aluminio", "Polímero"], size=n_muestras)
+
+    score = (temperatura > 85).astype(int) * 2 + (presion > 35).astype(int) * 2 + (vibracion > 0.7).astype(int) * 3
+    prob = 1 / (1 + np.exp(-(score - 2)))
+    fallo = (np.random.rand(n_muestras) < prob).astype(int)
+
+    df_ejemplo = pd.DataFrame({
+        "temperatura_c": temperatura,
+        "presion_bar": presion,
+        "vibracion_rms": vibracion,
+        "tipo_material": tipo_material,
+        "fallo_maquinaria": fallo
+    })
+
+    print("\nDataset de simulación generado (Línea de Producción):")
+    print(df_ejemplo.head())
+
+    preprocesador = PreprocesadorDatosIA()
+    X, y = preprocesador.ajustar_y_transformar(df_ejemplo, columna_target="fallo_maquinaria")
+
+    indices = np.random.permutation(len(X))
+    corte = int(len(X) * 0.8)
+    X_train, y_train = X[indices[:corte]], y[indices[:corte]]
+    X_test, y_test = X[indices[corte:]], y[indices[corte:]]
+
+    print(f"Muestras de Entrenamiento: {len(X_train)} | Muestras de Validación: {len(X_test)}")
+
+    n_features = X.shape[1]
+    ia = RedNeuronalIA(
+        n_entradas=n_features,
+        n_oculta1=16,
+        n_oculta2=8,
+        tasa_aprendizaje=0.05
+    )
+
+    ia.entrenar(X_train, y_train, epocas=800, verbose_cada=200)
+
+    y_pred = ia.predecir(X_test)
+    evaluar_metricas(y_test, y_pred)
+
+    ia.guardar("modelo_supabase_ia.npz")
+    print("\n✅ Proceso de Machine Learning ejecutado y completado exitosamente.")
+
+
