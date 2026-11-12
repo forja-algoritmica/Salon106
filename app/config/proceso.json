@@ -1,0 +1,41 @@
+{
+  "proceso": {
+    "conjuntos": 500,
+    "semilla": 42,
+    "tiempo_ciclo_seg": 1800.0,
+    "tiempo_ciclo_sigma": 240.0,
+    "inicio": "2026-11-10T06:00:00",
+    "reloj": "real",
+    "vida_herramienta": 300,
+    "tamano_lote": 50,
+    "linea": "ENSAMBLE-BRAZO",
+    "operadores": ["A. Ruiz", "M. Torres", "J. Salas", "L. Mendez"]
+  },
+  "defectos": {
+    "escala": 0.05,
+    "probabilidad_base": 0.0001,
+    "sigmas_atipico_min": 4.0,
+    "sigmas_atipico_max": 9.0,
+    "probabilidad_evento": 0.0008,
+    "probabilidad_cota_en_evento": 0.35,
+    "sigmas_evento_min": 2.5,
+    "sigmas_evento_max": 6.0,
+    "probabilidad_error_medicion": 0.00015,
+    "error_bandas_min": 0.6,
+    "error_bandas_max": 1.5,
+    "multiplicador_sigma": 1.0,
+    "deriva_total_sigmas": 3.0
+  },
+  "parametros": {
+    "temperatura_ref": 20.0,
+    "temperatura_sigma": 1.5,
+    "calentamiento_max": 3.0,
+    "piezas_calentamiento": 50
+  },
+  "salida": {
+    "carpeta": "datos",
+    "separador": ";",
+    "incluir_mediciones": false,
+    "incluir_parquet": false
+  }
+}

@@ -21,6 +21,11 @@ services:
   ml:
     <<: *seguridad
     build: ./ml
+    environment:
+      # El contenedor es de solo lectura: el modelo se guarda en un volumen.
+      ML_DIR_ARTEFACTOS: /artefactos
+    volumes:
+      - artefactos_ml:/artefactos
     networks: [app_net, data_net]
 
   # Plan B: PostgreSQL local para desarrollo o si falla internet en la demo.
@@ -50,3 +55,4 @@ networks:
 
 volumes:
   pgdata_local:
+  artefactos_ml:
