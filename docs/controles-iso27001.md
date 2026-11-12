@@ -13,9 +13,9 @@ La siguiente tabla representa una evaluación interna del proyecto y no constitu
 | A.5.15 / A.8.3 — Control de acceso | Roles de mínimo privilegio previstos en Supabase | Archivo `docs/supabase_setup.sql`; falta validar roles aplicados | Pendiente de validar |
 | A.5.17 / A.8.5 — Información de autenticación | Variables de conexión separadas del código mediante `.env` | `.env.example` y `.gitignore`; falta comprobar credenciales reales | Parcial |
 | A.5.19 / A.5.23 — Proveedores y nube | Uso de Supabase y Power BI | Arquitectura del proyecto; falta validar permisos y conexión | Pendiente de validar |
-| A.8.20 / A.8.21 — Seguridad de redes y servicios | Cadena personalizada en `DOCKER-USER`, monitoreo y bloqueo puntual | `firewall.sh`, logs `LP-FW:` y prueba `REJECT` | Parcial |
-| A.8.22 — Segregación de redes | Redes Docker `app_net` y `data_net`, esta última interna | `docker-compose.yml`, `docker network ls` | Parcial |
-| A.8.24 — Uso de criptografía | Configuración `DB_SSLMODE=require` prevista para PostgreSQL | `.env.example`; falta comprobar conexión TLS real | Pendiente de validar |
+| A.8.20 / A.8.21 — Seguridad de redes y servicios | Cadena `LINEA-PRODUCCION` en `DOCKER-USER` en modo observación (solo registra); bloqueo demostrado manualmente con una regla `REJECT` temporal | `firewall.sh`, logs `LP-FW:` y prueba `REJECT` | Parcial |
+| A.8.22 — Segregación de redes | Redes Docker `app_net` y `data_net` (esta última interna). Los servicios `generador` y `ml` están conectados a ambas redes, por lo que conservan salida al exterior mediante `app_net` | `docker-compose.yml`, `docker network ls` y pruebas Nmap desde Kali: puerto 8000/tcp filtrado desde `docker-labs_default` y abierto al conectar Kali a cada red; detalles en `network/README.md` | Parcial |
+| A.8.24 — Uso de criptografía | `DB_SSLMODE=require` previsto para PostgreSQL; TLS 1.3 verificado desde un contenedor temporal en `app_net` | `.env.example`, certificado CA de Supabase y pruebas E-SUP-03/E-SUP-04 en `network/README.md`; falta validar TLS en `generador` y `ml` | Parcial |
 | A.8.15 / A.8.16 — Registro y monitoreo | Logs del firewall y configuración de rotación de logs Docker | `journalctl`, contador iptables y `docker-compose.yml` | Parcial |
 | A.8.9 — Gestión de configuración | Configuración Docker y scripts de firewall versionados en Git | Rama `feature/network-security`, `docker-compose.yml` y archivos `network/` | Parcial |
 | A.8.4 / A.8.25 — Código y desarrollo seguro | Desarrollo mediante ramas Git | Rama `feature/network-security`; falta verificar revisiones y permisos | Parcial |
@@ -53,9 +53,11 @@ Resultado: eliminación de `LINEA-PRODUCCION`, conservando las reglas existentes
 
 ### E5. Gestión de configuración
 
-Se registraron cambios de endurecimiento de Docker en la rama `feature/network-security`, mediante el commit `3a151d0`.
+El endurecimiento de los contenedores Docker se registró en el commit `3a151d0`.
 
-Los scripts firewall.sh y firewall-reset.sh, junto con la documentación de seguridad, fueron incorporados al repositorio en la rama feature/network-security.
+Los scripts `firewall.sh` y `firewall-reset.sh`, junto con la documentación de seguridad, se incorporaron en el commit `539746e`.
+
+Las correcciones de inconsistencias documentales se registraron en el commit `ade1054`, dentro de la rama `feature/network-security`.
 
 ## Resultados generales
 

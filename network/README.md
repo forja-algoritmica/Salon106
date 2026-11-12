@@ -47,7 +47,14 @@ sudo ./network/firewall-reset.sh
 
 **Limitación:** el script actual solo registra conexiones IPv4 nuevas. No aplica todavía una política general de bloqueo ni limita la salida exclusivamente a Supabase.
 
-## 4. Pruebas realizadas
+### Notas de uso
+
+- La red `linea-produccion_app_net` debe existir antes de ejecutar `firewall.sh`.
+- Si Docker recrea la red y cambia su interfaz, ejecutar primero `firewall-reset.sh` y después `firewall.sh` para actualizar las reglas.
+- El registro `LOG` utiliza `--limit 5/min --limit-burst 5` y solo registra conexiones IPv4 nuevas que atraviesan la regla. No es un registro exhaustivo de todo el tráfico.
+- Las reglas personalizadas no tienen persistencia automática después de reiniciar el sistema.
+
+## 4. Pruebas de seguridad y estado de validación
 
 | Prueba | Resultado | Evidencia |
 |---|---|---|
@@ -59,9 +66,21 @@ sudo ./network/firewall-reset.sh
 | Ejecución de `firewall-reset.sh` | Exitosa | Cadena eliminada y reglas originales conservadas |
 | Conectividad real con Supabase | Pendiente | Falta configurar `DB_HOST` |
 | Restricción general de tráfico | Pendiente | Requiere política definitiva |
-| Pruebas con nmap | Pendiente | No realizadas |
+| Nmap desde Kali hacia app_net (172.28.0.2:8000) | Exitosa | Desde docker-labs_default: filtered; conectado a app_net: open |
+| Nmap desde Kali hacia data_net (172.18.0.2:8000) | Exitosa | Desde docker-labs_default: filtered; conectado a data_net: open |
 
 Las pruebas de bloqueo se realizaron manualmente y la regla temporal fue eliminada después de la verificación.
+
+Los contadores de paquetes corresponden a ejecuciones puntuales de las pruebas y no representan estadísticas acumuladas del tráfico de red.
+
+### Validación TLS con Supabase
+
+- **E-SUP-01:** conexión TCP exitosa desde `app_net` hacia `aws-0-us-east-2.pooler.supabase.com:5432`.
+- **E-SUP-02:** el servidor aceptó la solicitud PostgreSQL `SSLRequest`.
+- **E-SUP-03:** negociación TLS 1.3 desde CachyOS con la CA de Supabase; `Verify return code: 0 (ok)`.
+- **E-SUP-04:** negociación TLS 1.3 desde Docker con verificación de cadena y hostname; `Verification: OK`, `Verified peername: *.pooler.supabase.com` y cifrado `TLS_AES_256_GCM_SHA384`.
+
+Estas pruebas no validan todavía la autenticación PostgreSQL, las políticas RLS ni la configuración TLS de los servicios `generador` y `ml`.
 
 ## 5. Logs
 
