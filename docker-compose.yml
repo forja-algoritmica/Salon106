@@ -2,7 +2,7 @@ name: linea-produccion
 
 # Endurecimiento comun para los contenedores de Python
 x-seguridad: &seguridad
-  restart: unless-stopped
+  restart: "no"
   env_file: .env
   read_only: true
   tmpfs:
@@ -11,6 +11,11 @@ x-seguridad: &seguridad
     - ALL
   security_opt:
     - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
 
 services:
   generador:
@@ -37,7 +42,8 @@ services:
     networks: [data_net]
 
 networks:
-  # Zona de aplicacion (sale a internet solo hacia Supabase; el filtrado se agrega en el firewall del host)
+  # Zona de aplicacion con salida a internet.
+  # Restriccion exclusiva hacia Supabase pendiente de implementar.
   app_net:
     driver: bridge
     ipam:

@@ -8,7 +8,7 @@ Proyecto multidisciplinario: datos simulados -> rutina automatizada (ML) -> dash
 |---|---|---|
 | `app/` | Script de datos simulados (Python) | Equipo de datos |
 | `ml/` | Rutina automatizada de ML (Python) | Equipo de ML |
-| `network/` | Firewall, VPN y logs | Ciberseguridad y redes |
+| `network/` | Monitoreo de red, pruebas de firewall y logs | Ciberseguridad y redes |
 | `docs/` | Diagrama, SQL de Supabase y tabla ISO 27001 | Todos |
 
 ## Arranque rapido
