@@ -1,9 +1,9 @@
 -- =====================================================================
--- Setup de base de datos — Control de Calidad Dimensional + ML
+-- Setup de base de datos â€” Control de Calidad Dimensional + ML
 -- Generado por tools/configurar_bd.py
 --
 -- Ejecutar completo en Supabase -> SQL Editor.
--- ANTES de ejecutarlo, cambia las dos contraseñas marcadas como CAMBIAR.
+-- ANTES de ejecutarlo, cambia las dos contraseÃ±as marcadas como CAMBIAR.
 -- =====================================================================
 
 CREATE SCHEMA IF NOT EXISTS calidad_piezas;
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS calidad_piezas.cotas_definicion (
     codigo_cota VARCHAR(20) NOT NULL,
     nombre_caracteristica VARCHAR(150) NOT NULL,
     tipo_cota VARCHAR(30) CHECK (
-        tipo_cota IN ('Lineal', 'Diámetro', 'Radio', 'Ángulo', 'Espesor')
+        tipo_cota IN ('Lineal', 'DiÃ¡metro', 'Radio', 'Ãngulo', 'Espesor')
     ),
     valor_nominal NUMERIC(10, 2) NOT NULL,
     tolerancia_inferior NUMERIC(6, 3) DEFAULT -0.500,
@@ -55,10 +55,10 @@ CREATE TABLE IF NOT EXISTS calidad_piezas.mediciones_detalle (
     id_cota INT NOT NULL REFERENCES calidad_piezas.cotas_definicion(id_cota),
     valor_medido NUMERIC(10, 2) NOT NULL,
     es_conforme BOOLEAN,
-    instrumento_medicion VARCHAR(50) DEFAULT 'Vernier/Micrómetro/CMM'
+    instrumento_medicion VARCHAR(50) DEFAULT 'Vernier/MicrÃ³metro/CMM'
 );
 
--- Columnas de analítica (por si la tabla ya existía sin ellas)
+-- Columnas de analÃ­tica (por si la tabla ya existÃ­a sin ellas)
 ALTER TABLE calidad_piezas.revisiones_piezas
     ADD COLUMN IF NOT EXISTS id_herramienta VARCHAR(30),
     ADD COLUMN IF NOT EXISTS piezas_en_herramienta INTEGER,
@@ -135,7 +135,7 @@ END
 $$;
 
 GRANT USAGE ON SCHEMA calidad_piezas TO pipeline_rw, powerbi_ro;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA calidad_piezas TO pipeline_rw;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA calidad_piezas TO pipeline_rw;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA calidad_piezas TO pipeline_rw;
 GRANT SELECT ON ALL TABLES IN SCHEMA calidad_piezas TO powerbi_ro;
 GRANT USAGE ON SCHEMA public TO pipeline_rw, powerbi_ro;

@@ -1,13 +1,13 @@
-"""Configura la base de datos para el pipeline de calidad + ML.
+﻿"""Configura la base de datos para el pipeline de calidad + ML.
 
 Idempotente. Hace:
 
-1. Columnas de analítica en `calidad_piezas.revisiones_piezas`
-   (herramienta, desgaste, temperatura) — aditivas y nullable.
-2. Índices para el pivote de mediciones.
+1. Columnas de analÃ­tica en `calidad_piezas.revisiones_piezas`
+   (herramienta, desgaste, temperatura) â€” aditivas y nullable.
+2. Ãndices para el pivote de mediciones.
 3. Roles `pipeline_rw` (escritura) y `powerbi_ro` (solo lectura).
 4. Vistas en `public` para el equipo de ML.
-5. Escribe `docs/supabase_setup.sql` (sin contraseñas) y `.env` (con ellas).
+5. Escribe `docs/supabase_setup.sql` (sin contraseÃ±as) y `.env` (con ellas).
 
 Uso:  python tools/configurar_bd.py
 """
@@ -28,7 +28,7 @@ PROYECTO = SALON.parent / "linea_produccion"
 
 
 # ---------------------------------------------------------------------------
-# Conexión
+# ConexiÃ³n
 # ---------------------------------------------------------------------------
 def _leer_env(ruta: Path) -> dict[str, str]:
     datos: dict[str, str] = {}
@@ -64,12 +64,12 @@ def conectar():
 
 
 def password_guardada(variable: str, actual: dict[str, str]) -> str:
-    """Reutiliza la clave del .env para no cambiarla en cada ejecución."""
+    """Reutiliza la clave del .env para no cambiarla en cada ejecuciÃ³n."""
     return actual.get(variable) or secrets.token_urlsafe(18)
 
 
 # ---------------------------------------------------------------------------
-# Catálogo
+# CatÃ¡logo
 # ---------------------------------------------------------------------------
 def leer_cotas(con) -> list[str]:
     cur = con.cursor()
@@ -97,8 +97,8 @@ def sql_vista_entrenamiento(codigos: list[str]) -> str:
     return f"""
 -- ---------------------------------------------------------------------
 -- Vista 1: una fila por pieza, con las {len(codigos)} cotas medidas.
--- Sirve para clasificación y control de calidad automatizado.
--- La ÚLTIMA columna (`conforme`) es el objetivo binario 1/0.
+-- Sirve para clasificaciÃ³n y control de calidad automatizado.
+-- La ÃšLTIMA columna (`conforme`) es el objetivo binario 1/0.
 -- No incluye ids ni series: son texto de alta cardinalidad y no aportan.
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE VIEW public.v_entrenamiento_piezas AS
@@ -135,7 +135,7 @@ JOIN {ESQUEMA}.piezas p ON p.id_pieza = r.id_pieza;
 
 
 # ---------------------------------------------------------------------------
-# Archivo setup para el repositorio (sin contraseñas reales)
+# Archivo setup para el repositorio (sin contraseÃ±as reales)
 # ---------------------------------------------------------------------------
 def sql_setup_completo(codigos: list[str]) -> str:
     pivote = ",\n".join(
@@ -147,11 +147,11 @@ def sql_setup_completo(codigos: list[str]) -> str:
     _ = columnas
 
     return f"""-- =====================================================================
--- Setup de base de datos — Control de Calidad Dimensional + ML
+-- Setup de base de datos â€” Control de Calidad Dimensional + ML
 -- Generado por tools/configurar_bd.py
 --
 -- Ejecutar completo en Supabase -> SQL Editor.
--- ANTES de ejecutarlo, cambia las dos contraseñas marcadas como CAMBIAR.
+-- ANTES de ejecutarlo, cambia las dos contraseÃ±as marcadas como CAMBIAR.
 -- =====================================================================
 
 CREATE SCHEMA IF NOT EXISTS {ESQUEMA};
@@ -173,7 +173,7 @@ CREATE TABLE IF NOT EXISTS {ESQUEMA}.cotas_definicion (
     codigo_cota VARCHAR(20) NOT NULL,
     nombre_caracteristica VARCHAR(150) NOT NULL,
     tipo_cota VARCHAR(30) CHECK (
-        tipo_cota IN ('Lineal', 'Diámetro', 'Radio', 'Ángulo', 'Espesor')
+        tipo_cota IN ('Lineal', 'DiÃ¡metro', 'Radio', 'Ãngulo', 'Espesor')
     ),
     valor_nominal NUMERIC(10, 2) NOT NULL,
     tolerancia_inferior NUMERIC(6, 3) DEFAULT -0.500,
@@ -203,10 +203,10 @@ CREATE TABLE IF NOT EXISTS {ESQUEMA}.mediciones_detalle (
     id_cota INT NOT NULL REFERENCES {ESQUEMA}.cotas_definicion(id_cota),
     valor_medido NUMERIC(10, 2) NOT NULL,
     es_conforme BOOLEAN,
-    instrumento_medicion VARCHAR(50) DEFAULT 'Vernier/Micrómetro/CMM'
+    instrumento_medicion VARCHAR(50) DEFAULT 'Vernier/MicrÃ³metro/CMM'
 );
 
--- Columnas de analítica (por si la tabla ya existía sin ellas)
+-- Columnas de analÃ­tica (por si la tabla ya existÃ­a sin ellas)
 ALTER TABLE {ESQUEMA}.revisiones_piezas
     ADD COLUMN IF NOT EXISTS id_herramienta VARCHAR(30),
     ADD COLUMN IF NOT EXISTS piezas_en_herramienta INTEGER,
@@ -283,7 +283,7 @@ END
 $$;
 
 GRANT USAGE ON SCHEMA {ESQUEMA} TO pipeline_rw, powerbi_ro;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA {ESQUEMA} TO pipeline_rw;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {ESQUEMA} TO pipeline_rw;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {ESQUEMA} TO pipeline_rw;
 GRANT SELECT ON ALL TABLES IN SCHEMA {ESQUEMA} TO powerbi_ro;
 GRANT USAGE ON SCHEMA public TO pipeline_rw, powerbi_ro;
@@ -369,11 +369,11 @@ def main() -> int:
         ("pipeline_rw", "PIPELINE_RW_PASSWORD"),
         ("powerbi_ro", "POWERBI_RO_PASSWORD"),
     ):
-        # CREATE ROLE no admite parámetros enlazados: hay que embeber el
-        # literal. Solo se permiten caracteres seguros para evitar inyección.
+        # CREATE ROLE no admite parÃ¡metros enlazados: hay que embeber el
+        # literal. Solo se permiten caracteres seguros para evitar inyecciÃ³n.
         clave = claves[variable]
         if not re.fullmatch(r"[A-Za-z0-9_-]{12,}", clave):
-            raise SystemExit(f"Clave insegura para {rol}: usa solo letras, números, - y _")
+            raise SystemExit(f"Clave insegura para {rol}: usa solo letras, nÃºmeros, - y _")
         cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (rol,))
         if cur.fetchone():
             cur.execute(f"ALTER ROLE {rol} WITH LOGIN PASSWORD '{clave}'")
@@ -385,7 +385,7 @@ def main() -> int:
     print("4. Permisos ...")
     for sentencia in (
         f"GRANT USAGE ON SCHEMA {ESQUEMA} TO pipeline_rw, powerbi_ro",
-        f"GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA {ESQUEMA} TO pipeline_rw",
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {ESQUEMA} TO pipeline_rw",
         f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {ESQUEMA} TO pipeline_rw",
         f"GRANT SELECT ON ALL TABLES IN SCHEMA {ESQUEMA} TO powerbi_ro",
         "GRANT USAGE ON SCHEMA public TO pipeline_rw, powerbi_ro",
@@ -406,8 +406,8 @@ def main() -> int:
     cur.execute(SQL_VISTA_RIESGO)
     con.commit()
 
-    # Los permisos se otorgan después de crear las vistas (GRANT ... ON ALL
-    # TABLES no alcanza a objetos que aún no existían).
+    # Los permisos se otorgan despuÃ©s de crear las vistas (GRANT ... ON ALL
+    # TABLES no alcanza a objetos que aÃºn no existÃ­an).
     cur.execute(
         "GRANT SELECT ON public.v_entrenamiento_piezas, public.v_riesgo_piezas"
         " TO pipeline_rw, powerbi_ro"

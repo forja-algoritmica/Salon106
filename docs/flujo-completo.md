@@ -80,6 +80,17 @@ Debe listar `v_entrenamiento_piezas` y `v_riesgo_piezas`.
 python app\generador_datos.py --flujos 20
 ```
 
+**Para un histórico de un mes** (los ensambles se reparten en las fechas):
+
+```powershell
+python app\generador_datos.py --dias 30 --flujos 720      # uno cada hora
+python app\generador_datos.py --desde 2026-10-01 --hasta 2026-10-31 --flujos 744
+```
+
+El programa calcula el intervalo solo y arranca a las 06:00, con los turnos
+rotando. Si la base ya tiene datos, avisa de que las fechas quedarían
+desordenadas; conviene vaciarla antes (`--reiniciar`).
+
 **Qué verás**, un bloque por ensamble:
 
 ```

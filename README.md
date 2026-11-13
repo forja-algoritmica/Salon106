@@ -51,7 +51,7 @@ archivos `.bat` que invocan Python directamente:
 
 | Archivo | Qué hace |
 |---|---|
-| `Ejecutar generador.bat` | Arranca la línea de ensamble. Acepta `--flujos N`, `--sin-db`, `--reloj simulado`. |
+| `Ejecutar generador.bat` | Arranca la línea de ensamble. Acepta `--flujos N`, `--sin-db`, `--reloj simulado`, `--dias 30`. |
 | `Ejecutar ML.bat` | Entrena el modelo, detecta anomalías y muestra las decisiones de mantenimiento. |
 | `Ejecutar pruebas.bat` | Corre las 17 pruebas y dice si pasaron. |
 
