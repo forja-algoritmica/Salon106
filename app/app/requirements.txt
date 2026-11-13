@@ -1,0 +1,5 @@
+# Dependencias del servicio generador.
+# numpy para el motor de simulacion y pg8000 (Python puro) para PostgreSQL:
+# asi no depende de DLLs compiladas dentro del contenedor.
+numpy>=1.26
+pg8000>=1.31

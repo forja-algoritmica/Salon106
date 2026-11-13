@@ -1,0 +1,58 @@
+name: linea-produccion
+
+# Endurecimiento comun para los contenedores de Python
+x-seguridad: &seguridad
+  restart: unless-stopped
+  env_file: .env
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  generador:
+    <<: *seguridad
+    build: ./app
+    networks: [app_net, data_net]
+
+  ml:
+    <<: *seguridad
+    build: ./ml
+    environment:
+      # El contenedor es de solo lectura: el modelo se guarda en un volumen.
+      ML_DIR_ARTEFACTOS: /artefactos
+    volumes:
+      - artefactos_ml:/artefactos
+    networks: [app_net, data_net]
+
+  # Plan B: PostgreSQL local para desarrollo o si falla internet en la demo.
+  # Se activa con: docker compose --profile local up --build
+  db_local:
+    profiles: ["local"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_LOCAL:-solo_para_desarrollo_local}
+    volumes:
+      - pgdata_local:/var/lib/postgresql/data
+      - ./docs/supabase_setup.sql:/docker-entrypoint-initdb.d/01-setup.sql:ro
+    networks: [data_net]
+
+networks:
+  # Zona de aplicacion (sale a internet solo hacia Supabase; el filtrado se agrega en el firewall del host)
+  app_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+  # Zona de datos local: sin salida a internet
+  data_net:
+    driver: bridge
+    internal: true
+
+volumes:
+  pgdata_local:
+  artefactos_ml:

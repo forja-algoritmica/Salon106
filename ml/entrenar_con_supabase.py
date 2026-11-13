@@ -5,6 +5,7 @@ Consume los datos reales de PostgreSQL y entrena la Inteligencia Artificial.
 =============================================================================
 """
 
+import json
 import os
 import sys
 import numpy as np
@@ -57,24 +58,29 @@ def main():
     # 4. Descargar todos los registros de la tabla
     df_real = cargar_datos_tabla(tabla_elegida)
 
-    if len(df_real) < 10:
-        print(f"\n⚠️ La tabla '{tabla_elegida}' tiene muy pocos registros ({len(df_real)}).")
-        print("Se recomiendan al menos 50 o 100 registros para entrenar el modelo de Machine Learning.")
-        if len(df_real) == 0:
-            sys.exit(1)
+    if len(df_real) == 0:
+        print(f"\n❌ La tabla '{tabla_elegida}' está vacía (0 registros).")
+        print("Por favor inserta al menos un registro para poder entrenar el modelo.")
+        sys.exit(1)
+    elif len(df_real) < 10:
+        print(f"\nℹ️ Procesando con el lote disponible ({len(df_real)} registros encontrados en Supabase).")
 
     # 5. Preprocesamiento adaptativo a las columnas reales de la BD
     preprocesador = PreprocesadorDatosIA()
     col_target_config = os.getenv("SUPABASE_TARGET_COLUMN", None)
     X, y = preprocesador.ajustar_y_transformar(df_real, columna_target=col_target_config)
 
-    # 6. División Train (80%) y Test (20%)
+    # 6. División Train y Test (adaptativa a pocas muestras)
     np.random.seed(42)
-    indices = np.random.permutation(len(X))
-    corte = max(1, int(len(X) * 0.8))
-
-    X_train, y_train = X[indices[:corte]], y[indices[:corte]]
-    X_test, y_test = X[indices[corte:]], y[indices[corte:]]
+    if len(X) <= 5:
+        print(f"ℹ️ Cantidad reducida de piezas ({len(X)} muestras): entrenando con todas las muestras disponibles.")
+        X_train, y_train = X, y
+        X_test, y_test = X, y
+    else:
+        indices = np.random.permutation(len(X))
+        corte = max(1, int(len(X) * 0.8))
+        X_train, y_train = X[indices[:corte]], y[indices[:corte]]
+        X_test, y_test = X[indices[corte:]], y[indices[corte:]]
 
     print(f"Muestras de Entrenamiento: {len(X_train)} | Muestras de Validación: {len(X_test)}")
 
