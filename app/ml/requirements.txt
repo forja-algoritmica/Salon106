@@ -1,0 +1,8 @@
+# Dependencias del equipo de ML.
+# Se usa pg8000 (Python puro) en lugar de SQLAlchemy/psycopg para que funcione
+# en equipos con politicas de control de aplicaciones que bloquean DLLs sin
+# firmar, y tambien dentro del contenedor Linux.
+pg8000>=1.31
+pandas>=2.2
+numpy>=1.26
+python-dotenv>=1.0

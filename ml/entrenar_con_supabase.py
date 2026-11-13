@@ -5,6 +5,7 @@ Consume los datos reales de PostgreSQL y entrena la Inteligencia Artificial.
 =============================================================================
 """
 
+import json
 import os
 import sys
 import numpy as np
