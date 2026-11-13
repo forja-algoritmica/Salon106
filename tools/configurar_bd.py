@@ -316,13 +316,42 @@ SELECT
     CASE WHEN r.resultado_general = 'APROBADO' THEN 0 ELSE 1 END AS defectuosa
 FROM {ESQUEMA}.revisiones_piezas r
 JOIN {ESQUEMA}.piezas p ON p.id_pieza = r.id_pieza;
+
+CREATE OR REPLACE VIEW public.v_decisiones AS
+SELECT d.id_decision, d.id_revision, p.codigo_pieza, r.fecha_revision,
+       r.resultado_general, d.probabilidad, d.umbral, d.decision,
+       d.motivo, d.modelo, d.generado_en
+FROM {ESQUEMA}.decisiones d
+JOIN {ESQUEMA}.revisiones_piezas r ON r.id_revision = d.id_revision
+JOIN {ESQUEMA}.piezas p ON p.id_pieza = r.id_pieza;
 """
 
 
 SQL_PERMISOS_VISTAS = """
 -- Permisos sobre las vistas de ML (deben existir antes del GRANT)
-GRANT SELECT ON public.v_entrenamiento_piezas, public.v_riesgo_piezas
-    TO pipeline_rw, powerbi_ro;
+GRANT SELECT ON public.v_entrenamiento_piezas, public.v_riesgo_piezas,
+    public.v_decisiones TO pipeline_rw, powerbi_ro;
+"""
+
+SQL_VISTA_DECISIONES = f"""
+-- ---------------------------------------------------------------------
+-- Vista de decisiones para Power BI
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE VIEW public.v_decisiones AS
+SELECT d.id_decision,
+       d.id_revision,
+       p.codigo_pieza,
+       r.fecha_revision,
+       r.resultado_general,
+       d.probabilidad,
+       d.umbral,
+       d.decision,
+       d.motivo,
+       d.modelo,
+       d.generado_en
+FROM {ESQUEMA}.decisiones d
+JOIN {ESQUEMA}.revisiones_piezas r ON r.id_revision = d.id_revision
+JOIN {ESQUEMA}.piezas p ON p.id_pieza = r.id_pieza;
 """
 
 
@@ -382,7 +411,28 @@ def main() -> int:
         print(f"   {rol}")
     con.commit()
 
-    print("4. Permisos ...")
+    print("4. Tabla de decisiones ...")
+    cur.execute(
+        f"""CREATE TABLE IF NOT EXISTS {ESQUEMA}.decisiones (
+            id_decision  SERIAL PRIMARY KEY,
+            id_revision  INT NOT NULL UNIQUE
+                         REFERENCES {ESQUEMA}.revisiones_piezas(id_revision)
+                         ON DELETE CASCADE,
+            probabilidad NUMERIC(6,4) NOT NULL,
+            umbral       NUMERIC(6,4) NOT NULL,
+            decision     VARCHAR(30) NOT NULL,
+            motivo       VARCHAR(160),
+            modelo       VARCHAR(60),
+            generado_en  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    cur.execute(
+        f"CREATE INDEX IF NOT EXISTS ix_decisiones_tipo"
+        f" ON {ESQUEMA}.decisiones(decision)"
+    )
+    con.commit()
+
+    print("5. Permisos ...")
     for sentencia in (
         f"GRANT USAGE ON SCHEMA {ESQUEMA} TO pipeline_rw, powerbi_ro",
         f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {ESQUEMA} TO pipeline_rw",
@@ -404,6 +454,8 @@ def main() -> int:
     cur.execute(sql_vista_entrenamiento(codigos))
     con.commit()
     cur.execute(SQL_VISTA_RIESGO)
+    con.commit()
+    cur.execute(SQL_VISTA_DECISIONES)
     con.commit()
 
     # Los permisos se otorgan despuÃ©s de crear las vistas (GRANT ... ON ALL

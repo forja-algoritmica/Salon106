@@ -76,6 +76,7 @@ un reinicio. El detalle completo, los requisitos y los comandos están en
 | `app/generador_datos.py` | Simula la línea de ensamble del brazo (7 piezas, 82 cotas) y escribe en `calidad_piezas`. |
 | `ml/entrenar_con_supabase.py` | Red neuronal, división estratificada y umbral de decisión. |
 | `ml/predecir_interactivo.py` | Decisiones: continuar / revisar / cambiar herramienta. |
+| `ml/registrar_decisiones.py` | Guarda esas decisiones en la base (tabla `decisiones` y vista `v_decisiones`). |
 | `ml/detectar_anomalias.py` | Detección sin etiquetas (piezas raras aunque cumplan tolerancia). |
 | `ml/regresion_cota.py` | Predice el valor de una cota desde temperatura y desgaste. |
 | `docs/supabase_setup.sql` | Completo: tablas, trigger, roles, permisos y vistas de ML. |
@@ -84,6 +85,33 @@ un reinicio. El detalle completo, los requisitos y los comandos están en
 | `docs/flujo-completo.md` | **Manual del flujo completo**: pasos, comandos, salidas esperadas e interpretación. |
 | `docs/prompt-contexto.md` | **Prompt de contexto**: todo el proyecto en un documento para educar a otro modelo. |
 | `network/` | Pendiente. |
+
+## Base de datos y Power BI
+
+El esquema `calidad_piezas` tiene cinco tablas: `piezas`, `cotas_definicion`,
+`revisiones_piezas`, `mediciones_detalle` y `decisiones`. La conformidad de cada
+medida la calcula un trigger de la base, no la aplicación.
+
+Para Power BI se exponen cuatro objetos en `public`:
+
+| Objeto | Contenido |
+|---|---|
+| `vw_reporte_inspeccion` | Mediciones con límites y estado por dimensión |
+| `v_entrenamiento_piezas` | Una fila por pieza con las 82 cotas medidas |
+| `v_riesgo_piezas` | Solo covariables, para predecir el riesgo |
+| `v_decisiones` | Decisión del modelo por pieza, con su probabilidad |
+
+**Conexión:** *Obtener datos → Base de datos PostgreSQL*, servidor y base del
+`.env`, usuario `powerbi_ro` (solo lectura), con SSL activado.
+
+Relaciones principales:
+
+```
+mediciones_detalle[id_revision] → revisiones_piezas[id_revision]
+mediciones_detalle[id_cota]     → cotas_definicion[id_cota]
+decisiones[id_revision]         → revisiones_piezas[id_revision]
+revisiones_piezas[id_pieza]     → piezas[id_pieza]
+```
 
 ## Limitaciones conocidas
 

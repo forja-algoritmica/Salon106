@@ -231,6 +231,24 @@ Piezas sobre el umbral   : 25
 Las piezas de mayor desgaste deben recibir el riesgo más alto. Si no es así, el
 modelo no está aprendiendo y hay que revisar los datos.
 
+**Guardar las decisiones en la base** (para el tablero y la auditoría):
+
+```powershell
+python ml\registrar_decisiones.py --reemplazar
+```
+
+Escribe una fila por pieza en `calidad_piezas.decisiones` y deja lista la vista
+`public.v_decisiones` para Power BI.
+
+```
+Piezas evaluadas: 5040 | decisiones guardadas: 5040
+
+Distribución de decisiones:
+  CONTINUAR                4432  (87.94 %)
+  REVISAR PIEZA             525  (10.42 %)
+  CAMBIAR HERRAMIENTA        83  ( 1.65 %)
+```
+
 ---
 
 ## Chequeo rápido de salud

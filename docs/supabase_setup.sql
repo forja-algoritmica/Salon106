@@ -250,6 +250,14 @@ SELECT
 FROM calidad_piezas.revisiones_piezas r
 JOIN calidad_piezas.piezas p ON p.id_pieza = r.id_pieza;
 
+CREATE OR REPLACE VIEW public.v_decisiones AS
+SELECT d.id_decision, d.id_revision, p.codigo_pieza, r.fecha_revision,
+       r.resultado_general, d.probabilidad, d.umbral, d.decision,
+       d.motivo, d.modelo, d.generado_en
+FROM calidad_piezas.decisiones d
+JOIN calidad_piezas.revisiones_piezas r ON r.id_revision = d.id_revision
+JOIN calidad_piezas.piezas p ON p.id_pieza = r.id_pieza;
+
 -- Permisos sobre las vistas de ML (deben existir antes del GRANT)
-GRANT SELECT ON public.v_entrenamiento_piezas, public.v_riesgo_piezas
-    TO pipeline_rw, powerbi_ro;
+GRANT SELECT ON public.v_entrenamiento_piezas, public.v_riesgo_piezas,
+    public.v_decisiones TO pipeline_rw, powerbi_ro;

@@ -63,14 +63,17 @@ python ml\entrenar_con_supabase.py --tabla v_riesgo_piezas
 # 4. Predecir y decidir sobre las piezas recientes
 python ml\predecir_interactivo.py --ultimas 20
 
-# 5. Detección de anomalías (sin etiquetas)
+# 5. Guardar las decisiones en la base (para el tablero)
+python ml\registrar_decisiones.py
+
+# 6. Detección de anomalías (sin etiquetas)
 python ml\detectar_anomalias.py
 
-# 6. Regresión del valor de una cota
+# 7. Regresión del valor de una cota
 python ml\regresion_cota.py --listar
 python ml\regresion_cota.py --cota cota_plm_c01
 
-# 7. Pruebas automáticas
+# 8. Pruebas automáticas
 python -m pytest tests -q
 ```
 
@@ -114,6 +117,40 @@ es el recall: se detectan 7 de cada 10 piezas malas.
 Además evalúa la tendencia de las últimas 25 piezas: si el riesgo medio supera
 0,5 o más de la mitad están sobre el umbral, recomienda cambiar la herramienta
 aunque ninguna pieza aislada lo dispare.
+
+## Decisiones guardadas en la base
+
+`registrar_decisiones.py` calcula el riesgo de todas las piezas y lo guarda en
+`calidad_piezas.decisiones`, para que el tablero y la auditoría tengan el dato:
+
+```powershell
+python ml\registrar_decisiones.py
+python ml\registrar_decisiones.py --reemplazar   # recalcula desde cero
+```
+
+| Columna | Contenido |
+|---|---|
+| `id_revision` | Pieza evaluada (único: una decisión por pieza) |
+| `probabilidad` | Riesgo estimado por el modelo |
+| `umbral` | Umbral usado en esa corrida |
+| `decision` | `CONTINUAR`, `REVISAR PIEZA` o `CAMBIAR HERRAMIENTA` |
+| `motivo` | Explicación corta de la decisión |
+| `modelo` | Archivo del modelo que la generó |
+| `generado_en` | Cuándo se calculó |
+
+Para Power BI existe la vista `public.v_decisiones`, que ya une la decisión con
+la pieza, la fecha y el resultado real.
+
+**Ejemplo con un mes de datos** (5.040 piezas):
+
+| Decisión | Cantidad | Riesgo medio | Desgaste | Rechazo real |
+|---|---|---|---|---|
+| CONTINUAR | 4.432 | 0,19 | 0–299 | 1,5 % |
+| REVISAR PIEZA | 525 | 0,82 | 196–299 | 10,9 % |
+| CAMBIAR HERRAMIENTA | 83 | 0,92 | 244–299 | 20,5 % |
+
+Las piezas marcadas para cambio de herramienta tienen **7 veces más** probabilidad
+de estar defectuosas que el promedio: eso es lo que hace útil la tabla.
 
 ## Detección de anomalías (sin etiquetas)
 
