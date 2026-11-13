@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import time
+from datetime import date, datetime, time as hora, timedelta
 from pathlib import Path
 
 from . import consola
@@ -88,6 +89,25 @@ def _construir_parser() -> argparse.ArgumentParser:
             "simulado: avanza 30 min por ensamble (por defecto); "
             "real: marca cada pieza con la hora del equipo"
         ),
+    )
+    parser.add_argument(
+        "--desde",
+        metavar="AAAA-MM-DD",
+        default=None,
+        help="Fecha inicial del histórico (reparte los ensambles desde ese día)",
+    )
+    parser.add_argument(
+        "--hasta",
+        metavar="AAAA-MM-DD",
+        default=None,
+        help="Fecha final del histórico (se usa junto con --desde)",
+    )
+    parser.add_argument(
+        "--dias",
+        type=int,
+        metavar="N",
+        default=None,
+        help="Genera el histórico de los últimos N días, hasta hoy",
     )
     parser.add_argument("--sin-db", action="store_true", help="No escribir en la base de datos")
     parser.add_argument(
@@ -189,6 +209,33 @@ def _preparar_config(carpeta: Path):
     return cargar_config(carpeta)
 
 
+def _calcular_rango(args) -> tuple[datetime, datetime] | None:
+    """Interpreta --dias o --desde/--hasta y devuelve inicio y fin."""
+    try:
+        if args.dias is not None:
+            if args.dias <= 0:
+                consola.error("--dias debe ser mayor que 0.")
+                return None
+            fin = date.today()
+            inicio = fin - timedelta(days=args.dias)
+        else:
+            if not args.desde or not args.hasta:
+                consola.error("usa --desde y --hasta juntos, o solo --dias.")
+                return None
+            inicio = date.fromisoformat(args.desde)
+            fin = date.fromisoformat(args.hasta)
+    except ValueError:
+        consola.error("Las fechas deben tener el formato AAAA-MM-DD (ej. 2026-10-14).")
+        return None
+
+    if fin <= inicio:
+        consola.error("--hasta debe ser posterior a --desde.")
+        return None
+
+    # La jornada arranca a las 06:00, igual que los turnos del sistema.
+    return datetime.combine(inicio, hora(6, 0)), datetime.combine(fin, hora(6, 0))
+
+
 def _mostrar_estado(almacen, datos: BaseDatos) -> int:
     estado = almacen.resumen_estado()
     flujos = int(estado["flujos"] or 0)
@@ -257,6 +304,37 @@ def main(argv: list[str] | None = None) -> int:
         config.defectos.deriva_total_sigmas = args.deriva
     if args.reloj is not None:
         config.proceso.reloj = args.reloj
+
+    # --- Histórico repartido en un rango de fechas ------------------------
+    rango_forzado = False
+    if args.dias is not None or args.desde or args.hasta:
+        if args.reloj == "real":
+            consola.error("--desde/--hasta/--dias no se combinan con --reloj real.")
+            return 2
+        rango = _calcular_rango(args)
+        if rango is None:
+            return 2
+        inicio, fin = rango
+        cantidad = args.lote or args.flujos or config.proceso.conjuntos
+        if cantidad <= 0:
+            consola.error("Indica --flujos o --lote para saber cuántos ensambles repartir.")
+            return 2
+        segundos = (fin - inicio).total_seconds() / cantidad
+        if segundos < 60:
+            consola.error(
+                f"Demasiados ensambles ({cantidad}) para ese rango: saldría uno cada "
+                f"{segundos:.0f} s. Amplía el rango o reduce la cantidad."
+            )
+            return 2
+        config.proceso.inicio = inicio.isoformat()
+        config.proceso.reloj = "simulado"
+        config.proceso.tiempo_ciclo_seg = segundos
+        config.proceso.tiempo_ciclo_sigma = segundos * 0.05
+        rango_forzado = True
+        consola.informacion(
+            f"Histórico: {cantidad} ensambles del {inicio:%d/%m/%Y} al {fin:%d/%m/%Y}"
+            f" (uno cada {segundos / 60:.0f} min)."
+        )
 
     # --- Tasa de defectos objetivo (calibración automática) ---------------
     if args.tasa_defectos is not None and args.tasa_ensambles is not None:
@@ -400,6 +478,13 @@ def main(argv: list[str] | None = None) -> int:
             consola.informacion(
                 f"Retomando la línea en el flujo FL-{numero_inicial + 1:06d}."
             )
+        if numero_inicial and rango_forzado:
+            consola.aviso(
+                "La base ya tiene "
+                f"{numero_inicial} flujos: el histórico nuevo arrancará en la fecha "
+                "indicada y quedará desordenado respecto a los datos anteriores. "
+                "Para un histórico limpio usa --reiniciar antes."
+            )
 
     linea = Linea(
         config,
@@ -407,7 +492,8 @@ def main(argv: list[str] | None = None) -> int:
         escala_defectos=config.defectos.escala,
         numero_inicial=numero_inicial,
         contadores=contadores,
-        reloj_inicial=reloj_inicial,
+        # Con un rango explícito se ignora el reloj guardado en la base.
+        reloj_inicial=None if rango_forzado else reloj_inicial,
     )
     consola.cabecera(config, destino, args.flujos)
     cada = max(args.cada, 1)

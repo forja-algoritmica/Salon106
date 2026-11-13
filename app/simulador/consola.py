@@ -72,7 +72,7 @@ def cabecera(config: Config, destino: str, flujos: int) -> None:
     else:
         print(
             f"  Reloj       : simulado ({config.proceso.tiempo_ciclo_seg / 60:.0f} min"
-            " por ensamble, avanza más rápido que el calendario)"
+            " por ensamble)"
         )
     print(f"  Destino     : {destino}")
     if flujos:

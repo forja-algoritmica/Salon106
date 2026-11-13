@@ -1,131 +1,201 @@
-"""
-=============================================================================
-PIPELINE DE MACHINE LEARNING CON BASE DE DATOS SUPABASE
-Consume los datos reales de PostgreSQL y entrena la Inteligencia Artificial.
-=============================================================================
+"""Entrena la red neuronal con los datos de Supabase.
+
+Corrige tres problemas del esqueleto original:
+
+1. **Desbalance de clases.** Con ~7 % de piezas rechazadas, un modelo que diga
+   siempre "conforme" acierta el 93 % y parece bueno. Aquí se hace división
+   estratificada y se sobremuestrea la clase minoritaria en entrenamiento.
+2. **Fuga de información.** `v_entrenamiento_piezas` incluye las 82 medidas, así
+   que el modelo aprende las tolerancias (útil para validar, inútil para
+   predecir). Para anticipar el riesgo existe `v_riesgo_piezas`, que solo usa
+   covariables de máquina.
+3. **Modelo no reutilizable.** Antes se guardaban solo los pesos; ahora también
+   se guarda el preprocesamiento, imprescindible para predecir.
+
+Uso:
+    python entrenar_con_supabase.py
+    python entrenar_con_supabase.py --tabla v_riesgo_piezas
 """
 
+from __future__ import annotations
+
+import argparse
 import json
 import os
-import sys
+from pathlib import Path
+
 import numpy as np
-import pandas as pd
+
 from conexion_supabase import (
-    listar_tablas_disponibles,
     cargar_datos_tabla,
     inspeccionar_tabla,
+    listar_tablas_disponibles,
+    tabla_por_defecto,
 )
-from red_neuronal_ia import (
-    PreprocesadorDatosIA,
-    RedNeuronalIA,
-    evaluar_metricas,
-)
+from red_neuronal_ia import PreprocesadorDatosIA, RedNeuronalIA, evaluar_metricas
+from artefactos import ruta as ruta_artefacto
+
+RUTA_MODELO = ruta_artefacto("modelo_supabase_ia.npz")
+RUTA_ESTADO = ruta_artefacto("modelo_supabase_ia.json")
 
 
-def main():
-    print("\n" + "=" * 70)
-    print(" INICIANDO MACHINE LEARNING CON DATOS REALES DE SUPABASE")
+def dividir_estratificada(y: np.ndarray, fraccion_prueba: float = 0.2, semilla: int = 42):
+    """Divide conservando la proporción de clases en ambos conjuntos."""
+    rng = np.random.default_rng(semilla)
+    indices_train: list[int] = []
+    indices_prueba: list[int] = []
+    for clase in np.unique(y):
+        idx = np.flatnonzero(y.ravel() == clase)
+        rng.shuffle(idx)
+        corte = max(1, int(round(len(idx) * fraccion_prueba)))
+        indices_prueba.extend(idx[:corte].tolist())
+        indices_train.extend(idx[corte:].tolist())
+    return np.array(indices_train), np.array(indices_prueba)
+
+
+def dividir_tres(y: np.ndarray, semilla: int = 42):
+    """60 % entrenamiento, 20 % validación (umbral), 20 % prueba (informe)."""
+    idx_train, idx_resto = dividir_estratificada(y, fraccion_prueba=0.4, semilla=semilla)
+    idx_val, idx_test = dividir_estratificada(
+        y[idx_resto], fraccion_prueba=0.5, semilla=semilla + 1
+    )
+    return idx_train, idx_resto[idx_val], idx_resto[idx_test]
+
+
+def elegir_umbral(prob: np.ndarray, y: np.ndarray) -> tuple[float, float, float]:
+    """Busca el umbral que maximiza F1 en validación."""
+    mejor = (0.5, 0.0, 0.0)
+    for umbral in np.arange(0.30, 0.96, 0.05):
+        pred = (prob >= umbral).astype(int)
+        vp = int(np.sum((pred == 1) & (y.ravel() == 1)))
+        fp = int(np.sum((pred == 1) & (y.ravel() == 0)))
+        if vp == 0:
+            continue
+        precision = vp / (vp + fp) * 100
+        recall = vp / y.sum() * 100
+        f1 = 2 * precision * recall / (precision + recall)
+        if f1 > mejor[1]:
+            mejor = (float(umbral), f1, precision, recall)
+    return mejor[0], mejor[2], mejor[3]
+
+
+def sobremuestrear(X: np.ndarray, y: np.ndarray, semilla: int = 42):
+    """Duplica la clase minoritaria para que el modelo no la ignore."""
+    rng = np.random.default_rng(semilla)
+    clases, cuentas = np.unique(y, return_counts=True)
+    if len(clases) != 2:
+        return X, y
+    minoritaria = clases[np.argmin(cuentas)]
+    mayoritaria = clases[np.argmax(cuentas)]
+    idx_min = np.flatnonzero(y.ravel() == minoritaria)
+    idx_may = np.flatnonzero(y.ravel() == mayoritaria)
+
+    faltan = len(idx_may) - len(idx_min)
+    if faltan <= 0:
+        return X, y
+    extra = rng.choice(idx_min, size=faltan, replace=True)
+    indices = np.concatenate([np.arange(len(y)), extra])
+    rng.shuffle(indices)
+    return X[indices], y[indices]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Entrena el modelo con datos de Supabase")
+    parser.add_argument(
+        "--tabla",
+        default=tabla_por_defecto(),
+        help="Tabla o vista a usar (por defecto DB_TABLE o v_entrenamiento_piezas)",
+    )
+    parser.add_argument("--epocas", type=int, default=600)
+    args = parser.parse_args()
+
+    print("=" * 70)
+    print(" ENTRENAMIENTO CON DATOS REALES DE SUPABASE")
     print("=" * 70)
 
-    # 1. Obtener lista de tablas de la base de datos
-    try:
-        tablas = listar_tablas_disponibles()
-    except Exception as e:
-        print("\n❌ Error al conectar a la base de datos:")
-        print(e)
-        print("\nRecuerda verificar tu archivo '.env' y colocar tu contraseña en SUPABASE_PASSWORD.")
-        sys.exit(1)
+    disponibles = listar_tablas_disponibles()
+    if args.tabla not in disponibles:
+        print(f"\n La tabla '{args.tabla}' no existe en el esquema.")
+        print(f" Disponibles: {disponibles}")
+        print(" Ejecuta primero: python ../tools/configurar_bd.py")
+        return 1
 
-    if not tablas:
-        print("\n⚠️ No se encontraron tablas en el esquema 'public' de tu base de datos.")
-        print("Por favor crea o sube una tabla a Supabase para poder entrenar el modelo.")
-        sys.exit(1)
+    print(f"\n-> Usando: {args.tabla}")
+    inspeccionar_tabla(args.tabla)
 
-    print(f"\nTablas detectadas en tu base de datos Supabase: {tablas}")
+    tabla = cargar_datos_tabla(args.tabla)
+    if len(tabla) < 50:
+        print(f"\n Muy pocos registros ({len(tabla)}). Genera más datos con la línea.")
+        return 1
 
-    # 2. Seleccionar la tabla a procesar
-    tabla_config = os.getenv("SUPABASE_TABLE", "")
-    if tabla_config and tabla_config in tablas:
-        tabla_elegida = tabla_config
-    else:
-        tabla_elegida = tablas[0]
+    objetivo = os.getenv("DB_TARGET") or tabla.columnas[-1]
+    print(f"\nVariable objetivo: '{objetivo}'")
 
-    print(f"\n-> Procesando datos originales de la tabla: '{tabla_elegida}'")
-
-    # 3. Inspeccionar estructura de la tabla
-    inspeccionar_tabla(tabla_elegida)
-
-    # 4. Descargar todos los registros de la tabla
-    df_real = cargar_datos_tabla(tabla_elegida)
-
-    if len(df_real) == 0:
-        print(f"\n❌ La tabla '{tabla_elegida}' está vacía (0 registros).")
-        print("Por favor inserta al menos un registro para poder entrenar el modelo.")
-        sys.exit(1)
-    elif len(df_real) < 10:
-        print(f"\nℹ️ Procesando con el lote disponible ({len(df_real)} registros encontrados en Supabase).")
-
-    # 5. Preprocesamiento adaptativo a las columnas reales de la BD
     preprocesador = PreprocesadorDatosIA()
-    col_target_config = os.getenv("SUPABASE_TARGET_COLUMN", None)
-    X, y = preprocesador.ajustar_y_transformar(df_real, columna_target=col_target_config)
+    X, y = preprocesador.ajustar_y_transformar(tabla, columna_target=objetivo)
 
-    # 6. División Train y Test (adaptativa a pocas muestras)
-    np.random.seed(42)
-    if len(X) <= 5:
-        print(f"ℹ️ Cantidad reducida de piezas ({len(X)} muestras): entrenando con todas las muestras disponibles.")
-        X_train, y_train = X, y
-        X_test, y_test = X, y
-    else:
-        indices = np.random.permutation(len(X))
-        corte = max(1, int(len(X) * 0.8))
-        X_train, y_train = X[indices[:corte]], y[indices[:corte]]
-        X_test, y_test = X[indices[corte:]], y[indices[corte:]]
-
-    print(f"Muestras de Entrenamiento: {len(X_train)} | Muestras de Validación: {len(X_test)}")
-
-    # 7. Inicializar y entrenar la Red Neuronal con la dimensionalidad real
-    n_features = X.shape[1]
-    ia = RedNeuronalIA(
-        n_entradas=n_features,
-        n_oculta1=min(32, max(8, n_features * 2)),
-        n_oculta2=min(16, max(4, n_features)),
-        tasa_aprendizaje=0.03
+    total = len(y)
+    positivos = int(y.sum())
+    print(
+        f"\nClases: {positivos} no conformes de {total} "
+        f"({positivos / total * 100:.2f} %)"
+    )
+    print(
+        "Línea base (decir siempre 'conforme'): "
+        f"{(total - positivos) / total * 100:.2f} % de exactitud"
     )
 
-    ia.entrenar(X_train, y_train, epocas=800, verbose_cada=200)
+    idx_train, idx_val, idx_test = dividir_tres(y)
+    X_train, y_train = X[idx_train], y[idx_train]
+    X_val, y_val = X[idx_val], y[idx_val]
+    X_test, y_test = X[idx_test], y[idx_test]
+    print(
+        f"Entrenamiento: {len(X_train)} (positivos {int(y_train.sum())}) | "
+        f"Validación: {len(X_val)} (positivos {int(y_val.sum())}) | "
+        f"Prueba: {len(X_test)} (positivos {int(y_test.sum())})"
+    )
 
-    # 8. Evaluación con datos de prueba
-    if len(X_test) > 0:
-        y_pred = ia.predecir(X_test)
-        evaluar_metricas(y_test, y_pred)
+    X_train, y_train = sobremuestrear(X_train, y_train)
+    print(f"Tras sobremuestreo: {len(X_train)} muestras equilibradas")
 
-    # 9. Guardar modelo entrenado
-    ia.guardar("modelo_supabase_ia.npz")
+    red = RedNeuronalIA(
+        n_entradas=X.shape[1],
+        n_oculta1=min(32, max(8, X.shape[1] * 2)),
+        n_oculta2=min(16, max(4, X.shape[1])),
+        tasa_aprendizaje=0.03,
+    )
+    red.entrenar(X_train, y_train, epocas=args.epocas, verbose_cada=max(1, args.epocas // 4))
 
-    # 10. Probar predicción con las primeras filas reales
-    print("\n" + "=" * 60)
-    print(" DEMOSTRACIÓN: PREDICCIÓN CON LOS PRIMEROS REGISTROS DE LA BD")
-    print("=" * 60)
-    muestra_real = df_real.head(3)
-    X_muestra = preprocesador.transformar_nuevos_datos(muestra_real)
-    probs = ia.predecir_probabilidad(X_muestra)
-    preds = ia.predecir(X_muestra)
+    print("\nSelección del umbral de decisión (sobre validación):")
+    umbral, precision_val, recall_val = elegir_umbral(
+        red.predecir_probabilidad(X_val).ravel(), y_val
+    )
+    print(
+        f"  umbral elegido = {umbral:.2f} "
+        f"(validación: precisión {precision_val:.1f} %, recall {recall_val:.1f} %)"
+    )
 
-    for i, (_, fila) in enumerate(muestra_real.iterrows()):
-        print(f"\nRegistro #{i+1} de la Base de Datos:")
-        # Mostrar resumen de valores clave
-        valores_resumen = {k: v for k, v in fila.items() if k != preprocesador.columna_target}
-        print(f"  Datos: {valores_resumen}")
-        if preprocesador.columna_target in fila:
-            print(f"  Valor Real ({preprocesador.columna_target}): {fila[preprocesador.columna_target]}")
-        print(f"  -> Probabilidad estimada por IA: {probs[i][0] * 100:.2f}%")
-        print(f"  -> Predicción del modelo: {preds[i][0]}")
+    if len(X_test) and y_test.sum() > 0:
+        print(f"\nInforme sobre el conjunto de prueba, con umbral {umbral:.2f}:")
+        evaluar_metricas(y_test, red.predecir(X_test, umbral=umbral))
 
-    print("\n" + "=" * 70)
-    print(" ¡Entrenamiento completado exitosamente con tus datos de Supabase!")
-    print("=" * 70 + "\n")
+    red.guardar(RUTA_MODELO)
+    Path(RUTA_ESTADO).write_text(
+        json.dumps(
+            {
+                "tabla": args.tabla,
+                "objetivo": objetivo,
+                "umbral": umbral,
+                "preprocesador": preprocesador.exportar_estado(),
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    print(f"Preprocesamiento guardado en: {RUTA_ESTADO}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -18,9 +18,9 @@ python ml\detectar_anomalias.py
 
 echo.
 echo ============================================
-echo  3. PREDICCION Y DECISIONES (CON REGISTRO IA)
+echo  3. PREDICCION Y DECISIONES
 echo ============================================
-python ml\predecir_interactivo.py --ultimas 15 --con-ia
+python ml\predecir_interactivo.py --ultimas 15
 goto :fin
 
 :error

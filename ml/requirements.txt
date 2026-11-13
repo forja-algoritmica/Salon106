@@ -1,3 +1,7 @@
-# El equipo de ML agrega aqui sus librerias (pandas, scikit-learn, etc.).
-# Ojo: verifiquen que soporten Python 3.14; si alguna no instala, bajen todos a 3.12 o 3.13.
-psycopg[binary]>=3.2.10
+# Dependencias del equipo de ML.
+# Solo Python puro + numpy: se usa pg8000 en lugar de SQLAlchemy/psycopg, y no
+# se usa pandas, para que funcione en equipos con politicas de control de
+# aplicaciones (WDAC) que bloquean DLLs sin firmar, y tambien en el contenedor.
+numpy>=1.26
+pg8000>=1.31
+python-dotenv>=1.0

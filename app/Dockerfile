@@ -11,7 +11,8 @@ RUN useradd --create-home --uid 10001 appuser
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY generador_datos.py .
+# Se copia todo el servicio: el paquete `simulador` y la carpeta `config`.
+COPY . .
 
 USER appuser
 CMD ["python", "generador_datos.py"]

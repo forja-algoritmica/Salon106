@@ -2,30 +2,8 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-_RAIZ = Path(__file__).resolve().parent.parent
-for _sub in ("app", "ml"):
-    _r = str(_RAIZ / _sub)
-    if _r not in sys.path:
-        sys.path.insert(0, _r)
-
 import numpy as np
-
-try:
-    import pytest
-except ImportError:
-    class _Approx:
-        def __init__(self, v, abs=None):
-            self.v = v
-            self.abs = abs or 1e-4
-
-        def __eq__(self, other):
-            return abs(self.v - other) <= self.abs
-
-    class pytest:  # type: ignore
-        approx = _Approx
+import pytest
 
 from conexion_supabase import Tabla
 from detectar_anomalias import ajustar, puntajes
@@ -168,70 +146,3 @@ def test_la_regresion_recupera_los_coeficientes():
     assert beta[0] == pytest.approx(100.0, abs=0.5)
     assert beta[1] == pytest.approx(0.05, abs=0.002)
     assert beta[2] == pytest.approx(0.002, abs=0.0001)
-
-
-# ---------------------------------------------------------------------------
-# Análisis detallado con IA y Recomendaciones
-# ---------------------------------------------------------------------------
-def test_motor_ia_genera_analisis_critico_por_desgaste():
-    from analisis_ia import _motor_experto_calidad_ia, realizar_analisis_ia
-
-    metricas_criticas = {
-        "modelo_ml": "RedNeuronalIA_v1",
-        "piezas_evaluadas": 25,
-        "piezas_en_riesgo": 10,
-        "tasa_riesgo_pct": 40.0,
-        "riesgo_promedio": 0.65,
-        "desgaste_herramienta_max": 295,
-        "temperatura_media_c": 22.5,
-        "decision_operativa": "CAMBIAR HERRAMIENTA",
-        "nivel_urgencia": "ALTO",
-        "umbral_decision": 0.80,
-    }
-
-    resultado = _motor_experto_calidad_ia(metricas_criticas)
-    assert "ESTADO CRÍTICO" in resultado["resumen_ejecutivo"]
-    assert "Desgaste crítico" in resultado["analisis_detallado"]
-    assert "INTERVENCIÓN INMEDIATA" in resultado["acciones_mantenimiento"]
-    assert "Reemplazar el inserto" in resultado["acciones_mantenimiento"]
-
-    informe = realizar_analisis_ia(metricas_criticas)
-    assert informe["decision_operativa"] == "CAMBIAR HERRAMIENTA"
-    assert informe["piezas_evaluadas"] == 25
-    assert len(informe["recomendaciones_produccion"]) > 20
-
-
-def test_motor_ia_genera_analisis_estable():
-    from analisis_ia import realizar_analisis_ia
-
-    metricas_estables = {
-        "modelo_ml": "RedNeuronalIA_v1",
-        "piezas_evaluadas": 20,
-        "piezas_en_riesgo": 1,
-        "tasa_riesgo_pct": 5.0,
-        "riesgo_promedio": 0.12,
-        "desgaste_herramienta_max": 60,
-        "temperatura_media_c": 21.0,
-        "decision_operativa": "CONTINUAR",
-        "nivel_urgencia": "BAJO",
-        "umbral_decision": 0.80,
-    }
-
-    informe = realizar_analisis_ia(metricas_estables)
-    assert informe["nivel_urgencia"] == "BAJO"
-    assert "OPERACIÓN ESTABLE" in informe["resumen_ejecutivo"]
-    assert "Continuar producción estándar" in informe["acciones_mantenimiento"]
-    assert "estabilizar" in informe["recomendaciones_produccion"].lower() or "ciclos" in informe["recomendaciones_produccion"].lower()
-
-
-if __name__ == "__main__":
-    funciones = [
-        obj
-        for name, obj in list(globals().items())
-        if name.startswith("test_") and callable(obj)
-    ]
-    print(f"Ejecutando {len(funciones)} pruebas de ML...")
-    for fn in funciones:
-        fn()
-        print(f"  [PASS] {fn.__name__}")
-    print(f"\n¡Todas las {len(funciones)} pruebas pasaron exitosamente!")

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 
 from conexion_supabase import cargar_datos_tabla
@@ -33,7 +32,7 @@ RUTA_ESTADO = ruta_artefacto("modelo_supabase_ia.json")
 # Margen sobre el umbral para pasar de "revisar" a "intervenir".
 MARGEN_ACTUAR = 0.15
 # Cuántas piezas recientes se miran para la recomendación de mantenimiento.
-VENTANA_TENDENCIA = 10000
+VENTANA_TENDENCIA = 25
 
 
 def cargar_modelo():
@@ -57,18 +56,6 @@ def decidir(probabilidad: float, umbral: float) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Predicción y decisiones")
     parser.add_argument("--ultimas", type=int, default=20, help="Cuántas piezas analizar")
-    parser.add_argument(
-        "--con-ia",
-        action="store_true",
-        default=True,
-        help="Ejecutar análisis detallado con IA y registrar recomendaciones en la base de datos (activo por defecto)",
-    )
-    parser.add_argument(
-        "--sin-ia",
-        action="store_false",
-        dest="con_ia",
-        help="No registrar en la base de datos",
-    )
     args = parser.parse_args()
 
     red, pre, estado = cargar_modelo()
@@ -89,35 +76,25 @@ def main() -> int:
     X = pre.transformar_nuevos_datos(tabla)
     probabilidades = red.predecir_probabilidad(X).ravel()
 
-    if hasattr(tabla, "columns"):
-        columnas = list(tabla.columns)
-        filas = tabla.values.tolist()
-    else:
-        columnas = tabla.columnas
-        filas = tabla.filas
-
-    i_desgaste = columnas.index("piezas_en_herramienta") if "piezas_en_herramienta" in columnas else None
-    i_pieza = columnas.index("codigo_pieza") if "codigo_pieza" in columnas else None
+    i_desgaste = tabla.columnas.index("piezas_en_herramienta")
+    i_pieza = tabla.columnas.index("codigo_pieza")
 
     # Se ordenan por desgaste: las últimas son las de mayor riesgo potencial.
-    if i_desgaste is not None:
-        orden = sorted(range(len(filas)), key=lambda i: filas[i][i_desgaste] or 0)
-    else:
-        orden = list(range(len(filas)))
+    orden = sorted(range(len(tabla)), key=lambda i: tabla.filas[i][i_desgaste])
     seleccion = orden[-args.ultimas:]
 
     print(f"\n{'pieza':<10}{'desgaste':>9}{'riesgo':>9}   decisión")
     print("-" * 74)
     for i in seleccion:
         prob = float(probabilidades[i])
-        desgaste = int(filas[i][i_desgaste] or 0) if i_desgaste is not None else 0
-        pieza = str(filas[i][i_pieza]) if i_pieza is not None else f"item_{i}"
+        desgaste = int(tabla.filas[i][i_desgaste] or 0)
+        pieza = str(tabla.filas[i][i_pieza])
         print(f"{pieza:<10}{desgaste:>9}{prob * 100:>8.1f}%   {decidir(prob, umbral)}")
 
     # --- Decisión a nivel de herramienta --------------------------------
     ultimas = orden[-VENTANA_TENDENCIA:]
     riesgo_medio = sum(float(probabilidades[i]) for i in ultimas) / len(ultimas)
-    desgaste_max = max(int(filas[i][i_desgaste] or 0) for i in ultimas) if i_desgaste is not None else 0
+    desgaste_max = max(int(tabla.filas[i][i_desgaste] or 0) for i in ultimas)
     alertas = sum(1 for i in ultimas if float(probabilidades[i]) >= umbral)
 
     print("\n" + "=" * 74)
@@ -137,14 +114,6 @@ def main() -> int:
     else:
         print("\n ACCIÓN: continuar. Sin señales de degradación.")
     print("=" * 74)
-
-    if args.con_ia:
-        import analisis_ia
-
-        piezas_ia = int(os.getenv("IA_PIEZAS_EVALUAR", "1000"))
-        print(f"\nIniciando análisis detallado con IA y recomendaciones ({piezas_ia} piezas)...")
-        analisis_ia.ejecutar_analisis_completo(ultimas_piezas=piezas_ia, guardar=True)
-
     return 0
 
 

@@ -25,23 +25,14 @@ try:
     from dotenv import load_dotenv
 
     load_dotenv()
-    _ml_env = Path(__file__).resolve().parent / ".env"
-    if _ml_env.exists():
-        load_dotenv(_ml_env)
-    _root_env = Path(__file__).resolve().parent.parent / ".env"
-    if _root_env.exists():
-        load_dotenv(_root_env)
 except ImportError:  # pragma: no cover
-    for _env in (
-        Path(__file__).resolve().parent / ".env",
-        Path(__file__).resolve().parent.parent / ".env",
-    ):
-        if _env.exists():
-            for _linea in _env.read_text(encoding="utf-8").splitlines():
-                _linea = _linea.strip()
-                if _linea and not _linea.startswith("#") and "=" in _linea:
-                    _clave, _valor = _linea.split("=", 1)
-                    os.environ.setdefault(_clave.strip(), _valor.strip())
+    _env = Path(__file__).resolve().parent.parent / ".env"
+    if _env.exists():
+        for _linea in _env.read_text(encoding="utf-8").splitlines():
+            _linea = _linea.strip()
+            if _linea and not _linea.startswith("#") and "=" in _linea:
+                _clave, _valor = _linea.split("=", 1)
+                os.environ.setdefault(_clave.strip(), _valor.strip())
 
 
 # ---------------------------------------------------------------------------
@@ -100,79 +91,22 @@ def obtener_parametros() -> dict:
     }
 
 
-def _conectar_directo(params: dict, puerto: int):
-    try:
-        import pg8000.dbapi
-
-        contexto = ssl.create_default_context()
-        contexto.check_hostname = False
-        contexto.verify_mode = ssl.CERT_NONE
-        return pg8000.dbapi.connect(
-            host=params["host"],
-            port=puerto,
-            database=params["database"],
-            user=params["user"],
-            password=params["password"],
-            timeout=30,
-            ssl_context=contexto,
-        )
-    except ImportError:
-        try:
-            import psycopg2
-
-            return psycopg2.connect(
-                host=params["host"],
-                port=puerto,
-                dbname=params["database"],
-                user=params["user"],
-                password=params["password"],
-                connect_timeout=30,
-                sslmode="require",
-            )
-        except ImportError as exc:
-            raise ImportError(
-                "No se encontró ni 'pg8000' ni 'psycopg2' para conectar a PostgreSQL/Supabase. "
-                "Instala uno de ellos con 'pip install pg8000' o 'pip install psycopg2-binary'."
-            ) from exc
-
-
-def obtener_engine():
-    """Retorna un motor de SQLAlchemy configurado para Supabase."""
-    import urllib.parse
-    from sqlalchemy import create_engine
-    params = obtener_parametros()
-    password_encoded = urllib.parse.quote_plus(params["password"])
-    user_encoded = urllib.parse.quote_plus(params["user"])
-    url = f"postgresql+psycopg2://{user_encoded}:{password_encoded}@{params['host']}:{params['port']}/{params['database']}"
-    return create_engine(url, pool_pre_ping=True)
-
-
 def obtener_conexion():
+    import pg8000.dbapi
+
     params = obtener_parametros()
-    puerto_inicial = params["port"]
-    try:
-        return _conectar_directo(params, puerto_inicial)
-    except Exception as e:
-        # Si estamos en Supabase pooler y el puerto 5432 saturó la sesión (EMAXCONNSESSION) o falló,
-        # intentamos automáticamente en el puerto 6543 (Transaction pooler)
-        if "pooler.supabase.com" in params["host"] and puerto_inicial != 6543:
-            try:
-                return _conectar_directo(params, 6543)
-            except Exception:
-                pass
-        raise e
-
-
-def ejecutar(sql: str, parametros: tuple = ()) -> None:
-    """Ejecuta una sentencia SQL de modificación (INSERT, UPDATE, CREATE TABLE) y confirma los cambios."""
-    con = obtener_conexion()
-    try:
-        cur = con.cursor()
-        cur.execute(sql, parametros)
-        con.commit()
-        cur.close()
-    finally:
-        con.close()
+    contexto = ssl.create_default_context()
+    contexto.check_hostname = False
+    contexto.verify_mode = ssl.CERT_NONE
+    return pg8000.dbapi.connect(
+        host=params["host"],
+        port=params["port"],
+        database=params["database"],
+        user=params["user"],
+        password=params["password"],
+        timeout=30,
+        ssl_context=contexto,
+    )
 
 
 def consultar(sql: str, parametros: tuple = ()) -> Tabla:

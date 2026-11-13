@@ -80,6 +80,17 @@ Debe listar `v_entrenamiento_piezas` y `v_riesgo_piezas`.
 python app\generador_datos.py --flujos 20
 ```
 
+**Para un histórico de un mes** (los ensambles se reparten en las fechas):
+
+```powershell
+python app\generador_datos.py --dias 30 --flujos 720      # uno cada hora
+python app\generador_datos.py --desde 2026-10-01 --hasta 2026-10-31 --flujos 744
+```
+
+El programa calcula el intervalo solo y arranca a las 06:00, con los turnos
+rotando. Si la base ya tiene datos, avisa de que las fechas quedarían
+desordenadas; conviene vaciarla antes (`--reiniciar`).
+
 **Qué verás**, un bloque por ensamble:
 
 ```
@@ -219,6 +230,24 @@ Piezas sobre el umbral   : 25
 
 Las piezas de mayor desgaste deben recibir el riesgo más alto. Si no es así, el
 modelo no está aprendiendo y hay que revisar los datos.
+
+**Guardar las decisiones en la base** (para el tablero y la auditoría):
+
+```powershell
+python ml\registrar_decisiones.py --reemplazar
+```
+
+Escribe una fila por pieza en `calidad_piezas.decisiones` y deja lista la vista
+`public.v_decisiones` para Power BI.
+
+```
+Piezas evaluadas: 5040 | decisiones guardadas: 5040
+
+Distribución de decisiones:
+  CONTINUAR                4432  (87.94 %)
+  REVISAR PIEZA             525  (10.42 %)
+  CAMBIAR HERRAMIENTA        83  ( 1.65 %)
+```
 
 ---
 
