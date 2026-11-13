@@ -82,6 +82,7 @@ un reinicio. El detalle completo, los requisitos y los comandos están en
 | `docker-compose.yml` | Escrito y validado en estructura; **no ejecutado** por falta de virtualización. Ver `docs/docker.md`. |
 | `docs/propuestas-ml.md` | Comparación de las tres propuestas de ML en las ramas y decisión pendiente. |
 | `docs/flujo-completo.md` | **Manual del flujo completo**: pasos, comandos, salidas esperadas e interpretación. |
+| `docs/prompt-contexto.md` | **Prompt de contexto**: todo el proyecto en un documento para educar a otro modelo. |
 | `network/` | Pendiente. |
 
 ## Limitaciones conocidas
