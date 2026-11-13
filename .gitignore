@@ -13,3 +13,9 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+
+# Modelos y artefactos generados
+modelo_supabase_ia.npz
+modelo_supabase_ia.json
+detector_anomalias.json
+.pytest_cache/

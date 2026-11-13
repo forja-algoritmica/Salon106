@@ -2,227 +2,273 @@
 =============================================================================
 SISTEMA DE MACHINE LEARNING E INTELIGENCIA ARTIFICIAL EN PYTHON
 Modelo: Red Neuronal Artificial Adaptativa (Multilayer Perceptron / Deep Learning)
-Diseñado para consumir y entrenar directamente sobre datos de Base de Datos (Supabase)
+Diseñado para consumir y entrenar directamente sobre datos de Base de Datos
 =============================================================================
+
+Dependencias: solo numpy. El preprocesamiento trabaja sobre la clase `Tabla`
+de `conexion_supabase` en lugar de pandas, para que el pipeline funcione en
+equipos donde las extensiones compiladas están bloqueadas por políticas de
+seguridad (WDAC) y también dentro del contenedor Linux.
 """
 
-import json
+from __future__ import annotations
+
+from collections import Counter
+from decimal import Decimal
+
 import numpy as np
-import pandas as pd
+
+from conexion_supabase import Tabla
+
+# Columnas que nunca son predictoras.
+COLUMNAS_IGNORADAS = {"id", "uuid", "created_at", "updated_at", "fecha_creacion"}
+# Tope de categorías: evita explotar en columnas de alta cardinalidad
+# (por ejemplo, números de serie).
+MAX_CATEGORIAS = 50
+
+
+def _a_float(valor):
+    """Convierte a float; devuelve None si no es numérico."""
+    if valor is None:
+        return None
+    if isinstance(valor, bool):
+        return None
+    if isinstance(valor, (int, float, Decimal)):
+        return float(valor)
+    try:
+        return float(str(valor).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 class PreprocesadorDatosIA:
+    """Preprocesa cualquier tabla de la base de datos.
+
+    - Imputa nulos (mediana en numéricas, moda en categóricas).
+    - Normaliza numéricas con Z-score.
+    - Codifica categóricas con One-Hot.
+    - Prepara la variable objetivo binaria.
     """
-    Preprocesa dinámicamente cualquier tabla proveniente de la base de datos:
-    - Limpieza de valores nulos.
-    - Codificación de variables categóricas (One-Hot / Categorical).
-    - Normalización / Estandarización de variables numéricas (Z-score).
-    - Detección y preparación de variable objetivo (Target).
-    """
 
-    def __init__(self):
-        self.columnas_numericas = []
-        self.columnas_categoricas = []
-        self.medias = {}
-        self.desviaciones = {}
-        self.valores_categoricos = {}
-        self.columnas_finales_x = []
-        self.columna_target = None
-        self.tipo_target = "binario"  # binario o continuo
+    def __init__(self) -> None:
+        self.columnas_numericas: list[str] = []
+        self.columnas_categoricas: list[str] = []
+        self.medias: dict[str, float] = {}
+        self.desviaciones: dict[str, float] = {}
+        self.valores_categoricos: dict[str, list[str]] = {}
+        self.columnas_finales_x: list[str] = []
+        self.columna_target: str | None = None
+        self.tipo_target = "binario"
+        self.mapa_target: dict[str, float] = {}
 
-    def ajustar_y_transformar(self, df: pd.DataFrame, columna_target: str = None):
-        """Ajusta el preprocesador al DataFrame de la BD y retorna matrices X e y listas para la IA."""
-        df_limpio = df.copy()
-
-        # Determinar columna objetivo si no fue especificada
-        if columna_target and columna_target in df_limpio.columns:
+    # -- ajuste ------------------------------------------------------------
+    def ajustar_y_transformar(self, tabla: Tabla, columna_target: str | None = None):
+        if columna_target and columna_target in tabla.columnas:
             self.columna_target = columna_target
         else:
-            # Buscar nombres típicos de target o usar la última columna
-            posibles = ["target", "label", "estado", "status", "riesgo", "resultado", "class", "categoria"]
-            coincidencias = [c for c in df_limpio.columns if c.lower() in posibles]
-            self.columna_target = coincidencias[0] if coincidencias else df_limpio.columns[-1]
+            posibles = [
+                "target", "label", "estado", "status", "riesgo",
+                "resultado", "class", "categoria", "conforme",
+            ]
+            coincidencias = [
+                c for c in tabla.columnas if c.lower() in posibles
+            ]
+            self.columna_target = coincidencias[0] if coincidencias else tabla.columnas[-1]
 
-        # Separar objetivo y características
-        y_serie = df_limpio[self.columna_target]
-        df_caracteristicas = df_limpio.drop(columns=[self.columna_target])
+        y_crudo = tabla.columna(self.columna_target)
 
-        # Excluir identificadores, seriales, timestamps o columnas de alta cardinalidad
-        columnas_a_ignorar = [
-            c for c in df_caracteristicas.columns
-            if c.lower() in ["id", "uuid", "created_at", "updated_at", "fecha_creacion", "fabricado_en", "fecha_revision", "iniciado_en", "cerrado_en"]
-            or c.lower().startswith("id_")
-            or c.lower().endswith("_id")
-            or "serie" in c.lower()
-            or "flujo" in c.lower()
-            or (not pd.api.types.is_numeric_dtype(df_caracteristicas[c]) and df_caracteristicas[c].nunique() > 30)
+        features = [
+            c
+            for c in tabla.columnas
+            if c != self.columna_target and c.lower() not in COLUMNAS_IGNORADAS
         ]
-        if columnas_a_ignorar:
-            print(f"ℹ️ Omitiendo identificadores/series/no predictivas: {columnas_a_ignorar}")
-            df_caracteristicas = df_caracteristicas.drop(columns=columnas_a_ignorar)
 
-        # Detectar columnas numéricas y categóricas
-        self.columnas_numericas = df_caracteristicas.select_dtypes(include=["number"]).columns.tolist()
-        self.columnas_categoricas = [c for c in df_caracteristicas.columns if c not in self.columnas_numericas]
+        # Clasificar columnas por tipo real de dato
+        for columna in features:
+            valores = tabla.columna(columna)
+            numericos = [_a_float(v) for v in valores]
+            no_nulos = [v for v in numericos if v is not None]
+            if no_nulos and len(no_nulos) == len([v for v in valores if v is not None]):
+                self.columnas_numericas.append(columna)
+            else:
+                unicos = {str(v) for v in valores if v is not None}
+                if len(unicos) > MAX_CATEGORIAS:
+                    print(
+                        f"  Aviso: se omite '{columna}' "
+                        f"({len(unicos)} valores distintos, demasiado para one-hot)"
+                    )
+                    continue
+                self.columnas_categoricas.append(columna)
 
-        # 1. Tratar y normalizar numéricas
-        partes_df = []
-        df_num = pd.DataFrame(index=df_limpio.index)
-        for col in self.columnas_numericas:
-            mediana = df_caracteristicas[col].median()
-            mediana = 0.0 if pd.isna(mediana) else mediana
-            df_caracteristicas[col] = df_caracteristicas[col].fillna(mediana)
-            media = df_caracteristicas[col].mean()
-            media = 0.0 if pd.isna(media) else media
-            std = df_caracteristicas[col].std()
-            if std == 0 or np.isnan(std):
+        # Ajuste de numéricas
+        matriz = []
+        for columna in self.columnas_numericas:
+            numericos = [_a_float(v) for v in tabla.columna(columna)]
+            validos = [v for v in numericos if v is not None]
+            mediana = float(np.median(validos)) if validos else 0.0
+            completos = [v if v is not None else mediana for v in numericos]
+            media = float(np.mean(completos)) if completos else 0.0
+            std = float(np.std(completos)) if completos else 0.0
+            if std == 0:
                 std = 1.0
+            self.medias[columna] = media
+            self.desviaciones[columna] = std
 
-            self.medias[col] = media
-            self.desviaciones[col] = std
-            df_num[col] = (df_caracteristicas[col] - media) / std
+        # Ajuste de categóricas
+        columnas_dummy: list[tuple[str, list[str]]] = []
+        for columna in self.columnas_categoricas:
+            valores = [str(v) if v is not None else None for v in tabla.columna(columna)]
+            conteo = Counter(v for v in valores if v is not None)
+            moda = conteo.most_common(1)[0][0] if conteo else "DESCONOCIDO"
+            completos = [v if v is not None else moda for v in valores]
+            unicos = sorted(set(completos))
+            self.valores_categoricos[columna] = unicos
+            columnas_dummy.append((columna, unicos))
 
-        if not df_num.empty:
-            partes_df.append(df_num)
+        # Construcción de la matriz X
+        self.columnas_finales_x = list(self.columnas_numericas)
+        for columna, unicos in columnas_dummy:
+            self.columnas_finales_x.extend(f"{columna}_{v}" for v in unicos)
 
-        # 2. Tratar categóricas con One-Hot Encoding
-        if self.columnas_categoricas:
-            dummies_dict = {}
-            for col in self.columnas_categoricas:
-                serie_clean = df_caracteristicas[col].dropna()
-                moda = serie_clean.mode()[0] if not serie_clean.empty and not serie_clean.mode().empty else "DESCONOCIDO"
-                serie_col = df_caracteristicas[col].fillna(moda).astype(str)
-                valores_unicos = sorted(serie_col.unique())
-                self.valores_categoricos[col] = valores_unicos
+        for i in range(len(tabla)):
+            fila = []
+            for columna in self.columnas_numericas:
+                valor = _a_float(tabla.filas[i][tabla.columnas.index(columna)])
+                if valor is None:
+                    valor = self.medias[columna]
+                fila.append((valor - self.medias[columna]) / self.desviaciones[columna])
+            for columna, unicos in columnas_dummy:
+                valor = tabla.filas[i][tabla.columnas.index(columna)]
+                texto = str(valor) if valor is not None else None
+                if texto is None:
+                    conteo = Counter(
+                        str(v) for v in tabla.columna(columna) if v is not None
+                    )
+                    texto = conteo.most_common(1)[0][0] if conteo else "DESCONOCIDO"
+                fila.extend(1.0 if texto == v else 0.0 for v in unicos)
+            matriz.append(fila)
 
-                for val in valores_unicos:
-                    dummies_dict[f"{col}_{val}"] = (serie_col == val).astype(float)
-            if dummies_dict:
-                partes_df.append(pd.DataFrame(dummies_dict, index=df_limpio.index))
+        X = np.array(matriz, dtype=np.float64)
 
-        df_proc = pd.concat(partes_df, axis=1) if partes_df else pd.DataFrame(index=df_limpio.index)
-        self.columnas_finales_x = df_proc.columns.tolist()
-        X = df_proc.values.astype(np.float64)
-
-        # 3. Procesar variable objetivo (y)
-        # Convertir a binario o numérico si es categórica o tipo texto/string
-        if not pd.api.types.is_numeric_dtype(y_serie):
-            valores_target = sorted(y_serie.dropna().unique())
-            mapa_target = {v: idx for idx, v in enumerate(valores_target)}
-            print(f"ℹ️ Mapeo de la variable objetivo '{self.columna_target}': {mapa_target}")
-            y_proc = y_serie.map(mapa_target).fillna(0).values.astype(np.float64)
+        # Variable objetivo
+        y_limpio = [v for v in y_crudo]
+        numericos_y = [_a_float(v) for v in y_limpio]
+        if all(v is not None for v in numericos_y):
+            y_proc = np.array(numericos_y, dtype=np.float64)
         else:
-            mediana_y = y_serie.median()
-            mediana_y = 0.0 if pd.isna(mediana_y) else mediana_y
-            y_proc = y_serie.fillna(mediana_y).values.astype(np.float64)
+            valores_target = sorted({str(v) for v in y_limpio if v is not None})
+            self.mapa_target = {v: float(i) for i, v in enumerate(valores_target)}
+            y_proc = np.array(
+                [self.mapa_target.get(str(v), 0.0) for v in y_limpio], dtype=np.float64
+            )
 
-        # Si los valores son binarios (0 y 1 o etiquetas discretas)
         unicos = np.unique(y_proc)
         if len(unicos) <= 2:
             self.tipo_target = "binario"
-            if len(unicos) == 1:
-                # Todos los registros de la muestra tienen el mismo valor
-                y_proc = np.ones_like(y_proc, dtype=np.float64)
-            else:
-                y_proc = (y_proc == unicos[-1]).astype(np.float64)
+            y_proc = (y_proc == unicos[-1]).astype(np.float64)
         else:
             self.tipo_target = "continuo"
-
         y = y_proc.reshape(-1, 1)
 
         print("\n" + "=" * 60)
-        print(" RESUMEN DEL PREPROCESAMIENTO DE DATOS DE LA BD")
+        print(" RESUMEN DEL PREPROCESAMIENTO")
         print("=" * 60)
-        print(f"• Registros totales procesados: {len(X)}")
-        print(f"• Variable Objetivo seleccionada: '{self.columna_target}' (Tipo: {self.tipo_target})")
-        print(f"• Características de entrada resultantes ({len(self.columnas_finales_x)}):")
-        print(f"  {self.columnas_finales_x}")
+        print(f"• Registros procesados: {len(X)}")
+        print(f"• Objetivo: '{self.columna_target}' ({self.tipo_target})")
+        print(f"• Numéricas: {len(self.columnas_numericas)}")
+        print(f"• Categóricas: {len(self.columnas_categoricas)}")
+        print(f"• Entradas resultantes: {len(self.columnas_finales_x)}")
         print("=" * 60)
 
         return X, y
 
-    def transformar_nuevos_datos(self, df):
-        """Aplica el mismo preprocesamiento a nuevos datos que ingresen para inferencia."""
-        if not isinstance(df, pd.DataFrame):
-            df = pd.DataFrame(getattr(df, "filas", []), columns=getattr(df, "columnas", []))
-        df_proc = pd.DataFrame(index=df.index)
+    # -- inferencia --------------------------------------------------------
+    def transformar_nuevos_datos(self, tabla: Tabla) -> np.ndarray:
+        """Aplica el mismo preprocesamiento a datos nuevos."""
+        matriz = []
+        for i in range(len(tabla)):
+            fila = []
+            for columna in self.columnas_numericas:
+                if columna in tabla.columnas:
+                    valor = _a_float(tabla.filas[i][tabla.columnas.index(columna)])
+                else:
+                    valor = None
+                if valor is None:
+                    valor = self.medias.get(columna, 0.0)
+                fila.append((valor - self.medias[columna]) / self.desviaciones[columna])
+            for columna in self.columnas_categoricas:
+                valor = (
+                    tabla.filas[i][tabla.columnas.index(columna)]
+                    if columna in tabla.columnas
+                    else None
+                )
+                texto = str(valor) if valor is not None else ""
+                fila.extend(
+                    1.0 if texto == v else 0.0
+                    for v in self.valores_categoricos.get(columna, [])
+                )
+            matriz.append(fila)
+        return np.array(matriz, dtype=np.float64)
 
-        for col in self.columnas_numericas:
-            val = df[col] if col in df.columns else self.medias.get(col, 0)
-            val = pd.to_numeric(val, errors="coerce").fillna(self.medias.get(col, 0.0)).astype(float)
-            media = float(self.medias.get(col, 0))
-            std = float(self.desviaciones.get(col, 1))
-            if std == 0 or np.isnan(std):
-                std = 1.0
-            df_proc[col] = (val - media) / std
-
-        for col in self.columnas_categoricas:
-            valores_guardados = self.valores_categoricos.get(col, [])
-            val = df[col].astype(str) if col in df.columns else ""
-            for v in valores_guardados:
-                nombre_dummy = f"{col}_{v}"
-                df_proc[nombre_dummy] = (val == v).astype(float)
-
-        # Asegurar todas las columnas finales esperadas
-        for col_f in self.columnas_finales_x:
-            if col_f not in df_proc.columns:
-                df_proc[col_f] = 0.0
-
-        return df_proc[self.columnas_finales_x].values.astype(np.float64)
-
+    # -- persistencia ------------------------------------------------------
     def exportar_estado(self) -> dict:
         return {
             "columnas_numericas": self.columnas_numericas,
             "columnas_categoricas": self.columnas_categoricas,
-            "medias": {k: float(v) for k, v in self.medias.items()},
-            "desviaciones": {k: float(v) for k, v in self.desviaciones.items()},
-            "valores_categoricos": {k: list(v) for k, v in self.valores_categoricos.items()},
+            "medias": self.medias,
+            "desviaciones": self.desviaciones,
+            "valores_categoricos": self.valores_categoricos,
             "columnas_finales_x": self.columnas_finales_x,
             "columna_target": self.columna_target,
             "tipo_target": self.tipo_target,
+            "mapa_target": self.mapa_target,
         }
 
     @classmethod
-    def desde_estado(cls, estado: dict):
-        inst = cls()
-        inst.columnas_numericas = estado.get("columnas_numericas", [])
-        inst.columnas_categoricas = estado.get("columnas_categoricas", [])
-        inst.medias = estado.get("medias", {})
-        inst.desviaciones = estado.get("desviaciones", {})
-        inst.valores_categoricos = estado.get("valores_categoricos", {})
-        inst.columnas_finales_x = estado.get("columnas_finales_x", [])
-        inst.columna_target = estado.get("columna_target")
-        inst.tipo_target = estado.get("tipo_target", "binario")
-        return inst
+    def desde_estado(cls, datos: dict) -> "PreprocesadorDatosIA":
+        pre = cls()
+        pre.columnas_numericas = datos["columnas_numericas"]
+        pre.columnas_categoricas = datos["columnas_categoricas"]
+        pre.medias = datos["medias"]
+        pre.desviaciones = datos["desviaciones"]
+        pre.valores_categoricos = datos["valores_categoricos"]
+        pre.columnas_finales_x = datos["columnas_finales_x"]
+        pre.columna_target = datos.get("columna_target")
+        pre.tipo_target = datos.get("tipo_target", "binario")
+        pre.mapa_target = datos.get("mapa_target", {})
+        return pre
 
 
 # =====================================================================
 # RED NEURONAL PROFUNDA DINÁMICA (ADAPTATIVA A CUALQUIER TABLA)
 # =====================================================================
 class RedNeuronalIA:
-    """
-    Red Neuronal Multicapa configurable:
-    Entrada: n_entradas (adaptado a las columnas de la BD)
-    Capa Oculta 1: n_oculta1 neuronas con activación ReLU
-    Capa Oculta 2: n_oculta2 neuronas con activación ReLU
-    Capa Salida: 1 neurona (Sigmoide si binario)
+    """Red Neuronal Multicapa configurable.
+
+    Entrada: n_entradas (según las columnas de la BD)
+    Capa Oculta 1: ReLU
+    Capa Oculta 2: ReLU
+    Capa Salida: 1 neurona con Sigmoide (clasificación binaria)
     """
 
-    def __init__(self, n_entradas: int, n_oculta1: int = 16, n_oculta2: int = 8, tasa_aprendizaje: float = 0.05):
+    def __init__(
+        self,
+        n_entradas: int,
+        n_oculta1: int = 16,
+        n_oculta2: int = 8,
+        tasa_aprendizaje: float = 0.05,
+    ):
         self.n_entradas = n_entradas
         self.n_oculta1 = n_oculta1
         self.n_oculta2 = n_oculta2
         self.lr = tasa_aprendizaje
 
-        # Inicialización de He
-        np.random.seed(42)
-        self.W1 = np.random.randn(n_entradas, n_oculta1) * np.sqrt(2.0 / n_entradas)
+        rng = np.random.default_rng(42)  # inicialización de He
+        self.W1 = rng.standard_normal((n_entradas, n_oculta1)) * np.sqrt(2.0 / n_entradas)
         self.b1 = np.zeros((1, n_oculta1))
-
-        self.W2 = np.random.randn(n_oculta1, n_oculta2) * np.sqrt(2.0 / n_oculta1)
+        self.W2 = rng.standard_normal((n_oculta1, n_oculta2)) * np.sqrt(2.0 / n_oculta1)
         self.b2 = np.zeros((1, n_oculta2))
-
-        self.W3 = np.random.randn(n_oculta2, 1) * np.sqrt(2.0 / n_oculta2)
+        self.W3 = rng.standard_normal((n_oculta2, 1)) * np.sqrt(2.0 / n_oculta2)
         self.b3 = np.zeros((1, 1))
 
     @staticmethod
@@ -235,16 +281,13 @@ class RedNeuronalIA:
 
     @staticmethod
     def sigmoide(z):
-        z_clip = np.clip(z, -500, 500)
-        return 1.0 / (1.0 + np.exp(-z_clip))
+        return 1.0 / (1.0 + np.exp(-np.clip(z, -500, 500)))
 
     def forward(self, X):
         self.Z1 = np.dot(X, self.W1) + self.b1
         self.A1 = self.relu(self.Z1)
-
         self.Z2 = np.dot(self.A1, self.W2) + self.b2
         self.A2 = self.relu(self.Z2)
-
         self.Z3 = np.dot(self.A2, self.W3) + self.b3
         self.A3 = self.sigmoide(self.Z3)
         return self.A3
@@ -252,9 +295,10 @@ class RedNeuronalIA:
     @staticmethod
     def calcular_perdida(y_real, y_pred):
         m = y_real.shape[0]
-        epsilon = 1e-15
-        y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
-        return - (1 / m) * np.sum(y_real * np.log(y_pred) + (1 - y_real) * np.log(1 - y_pred))
+        y_pred = np.clip(y_pred, 1e-15, 1 - 1e-15)
+        return -(1 / m) * np.sum(
+            y_real * np.log(y_pred) + (1 - y_real) * np.log(1 - y_pred)
+        )
 
     def backward(self, X, y):
         m = X.shape[0]
@@ -281,22 +325,20 @@ class RedNeuronalIA:
         self.b1 -= self.lr * db1
 
     def entrenar(self, X, y, epocas: int = 1000, verbose_cada: int = 200):
-        print(f"\nIniciando entrenamiento del modelo con datos de la BD ({epocas} épocas)...")
+        print(f"\nEntrenando con {len(X)} muestras ({epocas} épocas) ...")
         print("-" * 65)
-
         for epoca in range(1, epocas + 1):
             pred = self.forward(X)
-            loss = self.calcular_perdida(y, pred)
-            clases = (pred >= 0.5).astype(int)
-            acc = np.mean(clases == y) * 100
-
+            perdida = self.calcular_perdida(y, pred)
+            acierto = np.mean((pred >= 0.5).astype(int) == y) * 100
             self.backward(X, y)
-
             if epoca % verbose_cada == 0 or epoca == 1:
-                print(f"Época {epoca:4d}/{epocas} | Pérdida (Loss): {loss:.4f} | Precisión: {acc:.2f}%")
-
+                print(
+                    f"Época {epoca:4d}/{epocas} | Pérdida: {perdida:.4f} | "
+                    f"Precisión: {acierto:.2f}%"
+                )
         print("-" * 65)
-        print("¡Entrenamiento finalizado exitosamente!\n")
+        print("Entrenamiento finalizado.\n")
 
     def predecir_probabilidad(self, X):
         return self.forward(X)
@@ -304,110 +346,53 @@ class RedNeuronalIA:
     def predecir(self, X, umbral: float = 0.5):
         return (self.predecir_probabilidad(X) >= umbral).astype(int)
 
-    def guardar(self, ruta="modelo_supabase_ia.npz"):
+    def guardar(self, ruta: str = "modelo_supabase_ia.npz") -> None:
         np.savez(
             ruta,
             W1=self.W1, b1=self.b1,
             W2=self.W2, b2=self.b2,
             W3=self.W3, b3=self.b3,
-            config=np.array([self.n_entradas, self.n_oculta1, self.n_oculta2])
+            config=np.array([self.n_entradas, self.n_oculta1, self.n_oculta2]),
         )
-        print(f"Modelo de IA guardado en: {ruta}")
+        print(f"Modelo guardado en: {ruta}")
 
     @classmethod
-    def cargar(cls, ruta="modelo_supabase_ia.npz"):
+    def cargar(cls, ruta: str = "modelo_supabase_ia.npz") -> "RedNeuronalIA":
         datos = np.load(ruta)
-        config = datos["config"]
-        inst = cls(n_entradas=int(config[0]), n_oculta1=int(config[1]), n_oculta2=int(config[2]))
-        inst.W1 = datos["W1"]
-        inst.b1 = datos["b1"]
-        inst.W2 = datos["W2"]
-        inst.b2 = datos["b2"]
-        inst.W3 = datos["W3"]
-        inst.b3 = datos["b3"]
-        return inst
+        n_entradas, n_oculta1, n_oculta2 = (int(v) for v in datos["config"])
+        red = cls(n_entradas, n_oculta1, n_oculta2)
+        red.W1, red.b1 = datos["W1"], datos["b1"]
+        red.W2, red.b2 = datos["W2"], datos["b2"]
+        red.W3, red.b3 = datos["W3"], datos["b3"]
+        return red
 
 
 def evaluar_metricas(y_real, y_pred):
     total = len(y_real)
-    vp = np.sum((y_real == 1) & (y_pred == 1))
-    vn = np.sum((y_real == 0) & (y_pred == 0))
-    fp = np.sum((y_real == 0) & (y_pred == 1))
-    fn = np.sum((y_real == 1) & (y_pred == 0))
+    vp = int(np.sum((y_real == 1) & (y_pred == 1)))
+    vn = int(np.sum((y_real == 0) & (y_pred == 0)))
+    fp = int(np.sum((y_real == 0) & (y_pred == 1)))
+    fn = int(np.sum((y_real == 1) & (y_pred == 0)))
 
-    acc = (vp + vn) / total * 100 if total > 0 else 0
-    precision = vp / (vp + fp) * 100 if (vp + fp) > 0 else 0
-    recall = vp / (vp + fn) * 100 if (vp + fn) > 0 else 0
-    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    acierto = (vp + vn) / total * 100 if total else 0
+    precision = vp / (vp + fp) * 100 if (vp + fp) else 0
+    recall = vp / (vp + fn) * 100 if (vp + fn) else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0
 
     print("=" * 55)
-    print("      REPORTE DE EVALUACIÓN (DATOS REALES DE LA BD)      ")
+    print("      REPORTE DE EVALUACIÓN (DATOS DE LA BD)      ")
     print("=" * 55)
-    print(f"Muestras de prueba evaluadas : {total}")
-    print(f"Exactitud general (Accuracy) : {acc:.2f}%")
+    print(f"Muestras de prueba           : {total}")
+    print(f"Exactitud general (Accuracy) : {acierto:.2f}%")
     print(f"Precisión (Precision)        : {precision:.2f}%")
     print(f"Sensibilidad (Recall)        : {recall:.2f}%")
     print(f"Puntaje F1 (F1-Score)        : {f1:.2f}%")
     print("-" * 55)
-    print(f"Matriz de Confusión:")
+    print("Matriz de Confusión:")
     print(f"  [VN: {vn:4d}]  [FP: {fp:4d}]")
     print(f"  [FN: {fn:4d}]  [VP: {vp:4d}]")
     print("=" * 55)
-
-
-if __name__ == "__main__":
-    print("\n" + "=" * 65)
-    print(" EJECUCIÓN AUTÓNOMA DEL MODELO DE MACHINE LEARNING / RED NEURONAL")
-    print("=" * 65)
-
-    # Generar un dataset para probar el ciclo completo de Machine Learning
-    np.random.seed(42)
-    n_muestras = 500
-
-    temperatura = np.random.normal(70, 15, n_muestras)
-    presion = np.random.normal(30, 5, n_muestras)
-    vibracion = np.random.normal(0.5, 0.2, n_muestras)
-    tipo_material = np.random.choice(["Acero", "Aluminio", "Polímero"], size=n_muestras)
-
-    score = (temperatura > 85).astype(int) * 2 + (presion > 35).astype(int) * 2 + (vibracion > 0.7).astype(int) * 3
-    prob = 1 / (1 + np.exp(-(score - 2)))
-    fallo = (np.random.rand(n_muestras) < prob).astype(int)
-
-    df_ejemplo = pd.DataFrame({
-        "temperatura_c": temperatura,
-        "presion_bar": presion,
-        "vibracion_rms": vibracion,
-        "tipo_material": tipo_material,
-        "fallo_maquinaria": fallo
-    })
-
-    print("\nDataset de simulación generado (Línea de Producción):")
-    print(df_ejemplo.head())
-
-    preprocesador = PreprocesadorDatosIA()
-    X, y = preprocesador.ajustar_y_transformar(df_ejemplo, columna_target="fallo_maquinaria")
-
-    indices = np.random.permutation(len(X))
-    corte = int(len(X) * 0.8)
-    X_train, y_train = X[indices[:corte]], y[indices[:corte]]
-    X_test, y_test = X[indices[corte:]], y[indices[corte:]]
-
-    print(f"Muestras de Entrenamiento: {len(X_train)} | Muestras de Validación: {len(X_test)}")
-
-    n_features = X.shape[1]
-    ia = RedNeuronalIA(
-        n_entradas=n_features,
-        n_oculta1=16,
-        n_oculta2=8,
-        tasa_aprendizaje=0.05
+    print(
+        "Lectura: 'Recall' es qué porcentaje de las piezas malas se detectan.\n"
+        "         'Precision' es qué porcentaje de las alarmas son reales."
     )
-
-    ia.entrenar(X_train, y_train, epocas=800, verbose_cada=200)
-
-    y_pred = ia.predecir(X_test)
-    evaluar_metricas(y_test, y_pred)
-
-    ia.guardar("modelo_supabase_ia.npz")
-    print("\n✅ Proceso de Machine Learning ejecutado y completado exitosamente.")
-
-
