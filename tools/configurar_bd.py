@@ -461,7 +461,8 @@ def main() -> int:
     # Los permisos se otorgan despuÃ©s de crear las vistas (GRANT ... ON ALL
     # TABLES no alcanza a objetos que aÃºn no existÃ­an).
     cur.execute(
-        "GRANT SELECT ON public.v_entrenamiento_piezas, public.v_riesgo_piezas"
+        "GRANT SELECT ON public.v_entrenamiento_piezas, public.v_riesgo_piezas,"
+        " public.v_decisiones"
         " TO pipeline_rw, powerbi_ro"
     )
     con.commit()
